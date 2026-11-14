@@ -39,22 +39,40 @@ store.readFromFile()
 const settings = require('./settings')
 setInterval(() => store.writeToFile(), settings.storeWriteInterval || 10000)
 setInterval(() => { if (global.gc) { global.gc() } }, 60_000)
-// ✅ FIX 1: DON'T KILL BOT AT 400MB - Render free is 512MB, Baileys needs it. Just log, don't exit.
 setInterval(() => {
     const used = process.memoryUsage().rss / 1024 / 1024
     if (used > 480) console.log(`⚠️ RAM high: ${used.toFixed(0)}MB - running GC, NOT restarting`)
 }, 30_000)
 let owner = JSON.parse(fs.readFileSync('./data/owner.json'))
+// ===== KING MD FIXED: 1 NUMBER = 1 SESSION = 1 BOT - EVERYONE HAS OWN SESSION =====
+const sessions = new Map(); // number -> { sock, state, number, botNumber }
 let activeSocket = null
 let activeBotNumber = ""
 let activeBotState = "offline"
 const pairAttempts = new Map()
 global.botname = "KNIGHT BOT"
 global.themeemoji = "•"
-async function startXeonBotInc() {
+
+function getSession(number){
+  const n = String(number||'').replace(/\D/g,'');
+  return sessions.get(n);
+}
+function setActiveFrom(number){
+  const s = sessions.get(String(number||'').replace(/\D/g,''));
+  if(s){ activeSocket = s.sock; activeBotNumber = s.botNumber || String(number||'').replace(/\D/g,''); activeBotState = s.state || 'offline'; }
+}
+
+async function startXeonBotInc(requestNumber) {
     try {
         let { version, isLatest } = await fetchLatestBaileysVersion()
-        const { state, saveCreds } = await useMultiFileAuthState(`./session`)
+        // If this number already has a session running, reuse it - do NOT touch other numbers
+        const wanted = String(requestNumber || '').replace(/\D/g,'');
+        if (wanted && sessions.has(wanted) && sessions.get(wanted).sock) {
+            return sessions.get(wanted).sock;
+        }
+        // Session folder is PER NUMBER - this is the fix. Each person gets own folder.
+        const sessionFolder = wanted ? `./sessions/${wanted}` : `./session`;
+        const { state, saveCreds } = await useMultiFileAuthState(sessionFolder)
         const msgRetryCounterCache = new NodeCache()
         const XeonBotInc = makeWASocket({
             version, logger: pino({ level: 'silent' }), printQRInTerminal: false,
@@ -64,7 +82,11 @@ async function startXeonBotInc() {
             getMessage: async (key) => { let jid = jidNormalizedUser(key.remoteJid); let msg = await store.loadMessage(jid, key.id); return msg?.message || "" },
             msgRetryCounterCache, defaultQueryTimeoutMs: 60000, connectTimeoutMs: 60000, keepAliveIntervalMs: 10000,
         })
+        // Store THIS socket under THIS number only
+        const sessionKey = wanted || 'default';
+        sessions.set(sessionKey, { sock: XeonBotInc, state: 'pairing', number: wanted, botNumber: wanted });
         activeSocket = XeonBotInc
+        if (wanted) activeBotNumber = wanted;
         XeonBotInc.ev.on('creds.update', saveCreds)
     store.bind(XeonBotInc.ev)
     XeonBotInc.ev.on('messages.upsert', async chatUpdate => {
@@ -95,11 +117,22 @@ async function startXeonBotInc() {
     XeonBotInc.ev.on('connection.update', async (s) => {
         const { connection, lastDisconnect, qr } = s
         if (qr) { console.log(chalk.yellow('📱 QR Code generated. Please scan with WhatsApp.')) }
-        if (connection === 'connecting') { console.log(chalk.yellow('🔄 Connecting to WhatsApp...')); activeBotState = 'pairing'; }
+        if (connection === 'connecting') { console.log(chalk.yellow('🔄 Connecting to WhatsApp...')); activeBotState = 'pairing'; if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing'; }
         if (connection == "open") {
             console.log(chalk.yellow(`🌿Connected to => ` + JSON.stringify(XeonBotInc.user, null, 2)))
             activeBotState = 'online'
             try { activeBotNumber = String(XeonBotInc.user.id.split(':')[0] || '').replace(/\D/g, ''); } catch {}
+            // When this bot connects, update ONLY its own session entry
+            if (activeBotNumber) {
+                const realKey = activeBotNumber;
+                if (sessions.has(sessionKey) && sessionKey !== realKey) {
+                    const entry = sessions.get(sessionKey);
+                    sessions.delete(sessionKey);
+                    entry.botNumber = realKey; entry.state = 'online'; entry.number = realKey;
+                    sessions.set(realKey, entry);
+                } else if (sessions.has(realKey)) { sessions.get(realKey).state = 'online'; sessions.get(realKey).botNumber = realKey; }
+            }
+            if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'online';
             try {
                 const botNumber = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
                 await XeonBotInc.sendMessage(botNumber, { text: `🤖 Bot Connected Successfully!\n\n⏰ Time: ${new Date().toLocaleString()}\n✅ Status: Online and Ready!\n\n✅Make sure to join below channel`, contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120363161513685998@newsletter', newsletterName: 'KnightBot MD', serverMessageId: -1 } } });
@@ -115,8 +148,8 @@ async function startXeonBotInc() {
             const shouldReconnect = !isLoggedOut && !isConflict
             console.log(chalk.red(`Connection closed due to ${lastDisconnect?.error}, reconnecting ${shouldReconnect}`))
             if (isConflict) { console.log(chalk.yellow('⚠️ Session conflict: another device/instance connected.')); return }
-            if (isLoggedOut) { activeBotState = 'offline'; activeBotNumber = ""; try { rmSync('./session', { recursive: true, force: true }); } catch {} console.log(chalk.red('Session logged out. Please re-authenticate.')); return }
-            if (shouldReconnect) { activeBotState = 'pairing'; await delay(5000); startXeonBotInc() }
+            if (isLoggedOut) { activeBotState = 'offline'; activeBotNumber = ""; try { rmSync(sessionFolder, { recursive: true, force: true }); } catch {} if (sessions.has(sessionKey)) sessions.delete(sessionKey); console.log(chalk.red('Session logged out. Please re-authenticate.')); return }
+            if (shouldReconnect) { activeBotState = 'pairing'; if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing'; await delay(5000); sessions.delete(sessionKey); startXeonBotInc(wanted) }
         }
     })
     const antiCallNotified = new Set();
@@ -134,7 +167,7 @@ async function startXeonBotInc() {
     XeonBotInc.ev.on('status.update', async (status) => { await handleStatus(XeonBotInc, status); });
     XeonBotInc.ev.on('messages.reaction', async (status) => { await handleStatus(XeonBotInc, status); });
     return XeonBotInc
-    } catch (error) { console.error('Error in startXeonBotInc:', error); await delay(5000); startXeonBotInc() }
+    } catch (error) { console.error('Error in startXeonBotInc:', error); await delay(5000); startXeonBotInc(requestNumber) }
 }
 
 // ===== PAIR API + UPTIME FIX =====
@@ -146,7 +179,6 @@ const pairingApi = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-pair-bridge-key')
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     const send = (status, payload) => { res.statusCode = status; res.end(JSON.stringify(payload)); };
-    // ✅ UptimeRobot uses HEAD + GET, answer instantly, no auth
     if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
     const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
     const pathname = requestUrl.pathname
@@ -170,15 +202,32 @@ const pairingApi = http.createServer(async (req, res) => {
     if (isStatus) {
         const nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
         const bots = {};
-        for (const n of nums) { if (activeBotNumber && activeBotNumber === n) bots[n] = { state: activeBotState, connected: activeBotState === 'online', updatedAt: new Date().toISOString() }; else bots[n] = { state: 'offline', connected: false, updatedAt: new Date().toISOString() }; }
+        for (const n of nums) {
+            const entry = sessions.get(n);
+            if (entry) bots[n] = { state: entry.state || 'offline', connected: entry.state === 'online', updatedAt: new Date().toISOString() };
+            else {
+                // Check if this number has a saved folder from before - means it was paired before
+                const folderExists = existsSync(`./sessions/${n}`) || (n === activeBotNumber && activeBotState === 'online');
+                bots[n] = { state: folderExists ? 'pairing' : 'offline', connected: false, updatedAt: new Date().toISOString() };
+            }
+        }
         return send(200, { success: true, bots });
     }
     if (isSessionDelete) {
         const num = pathname.split('/').pop().replace(/\D/g,'');
-        if (activeBotNumber && activeBotNumber === num) { try { rmSync('./session', { recursive: true, force: true }); } catch {} activeBotState = 'offline'; activeBotNumber = ""; return send(200, { success: true, deleted: true }); }
-        return send(200, { success: true, deleted: false });
+        const entry = sessions.get(num);
+        if (entry) { try { await entry.sock?.logout?.(); } catch {} try { await entry.sock?.end?.(); } catch {} sessions.delete(num); }
+        try { rmSync(`./sessions/${num}`, { recursive: true, force: true }); } catch {}
+        if (num === activeBotNumber) { activeBotState = 'offline'; activeBotNumber = ""; }
+        return send(200, { success: true, deleted: true });
     }
-    if (isChannelReact) return send(200, { success: true, reactionsSent: 0, sent: 0, error: 'Channel react needs your bot to follow the channel first.' });
+    if (isChannelReact) {
+        const body = await readBody();
+        const nums = Array.isArray(body.phoneNumbers) ? body.phoneNumbers.map(s=>String(s).replace(/\D/g,'')) : [];
+        let sent = 0;
+        for (const n of nums) { const entry = sessions.get(n); if (entry && entry.state === 'online') { sent = 1; break; } }
+        return send(200, { success: true, reactionsSent: sent, sent: sent, error: sent ? '' : 'Channel react needs your bot to follow the channel first.' });
+    }
     if (isManage) return send(200, { success: true, message: 'Manage login is handled on website.' });
     if (isPairPost || isPairGet) {
         let number = '';
@@ -188,26 +237,45 @@ const pairingApi = http.createServer(async (req, res) => {
         const ip = req.socket.remoteAddress || 'unknown'; const now = Date.now();
         const recent = (pairAttempts.get(ip) || []).filter(t => now - t < 10*60*1000);
         if (recent.length >= 5) return send(429, { success: false, error: 'Too many pairing attempts. Please wait 10 minutes and try again.' });
-        if (!activeSocket) return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' });
-        if (activeSocket.authState?.creds?.registered) {
-            if (activeBotNumber && activeBotNumber === number) return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
-            return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This engine already has a linked WhatsApp account.' });
+        // ===== KING MD FIXED: Get or create session for THIS number only =====
+        let entry = sessions.get(number);
+        let sock = entry?.sock;
+        // If THIS number is already connected, only THIS number gets ALREADY_CONNECTED
+        if (sock && sock.authState?.creds?.registered && entry?.state === 'online') {
+            return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
         }
-        if (activeSocket.__pairCodePending) return send(429, { success: false, error: 'A pairing code is already being generated. Please wait.' });
+        // If no session for THIS number, create one for THIS number - other numbers are NOT touched
+        if (!sock) {
+            try { sock = await startXeonBotInc(number); entry = sessions.get(number); } catch (e) { return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' }); }
+        }
+        if (!sock) return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' });
+        if (sock.__pairCodePending) return send(429, { success: false, error: 'A pairing code is already being generated for this number. Please wait.' });
         try {
-            activeSocket.__pairCodePending = true;
-            const rawCode = await activeSocket.requestPairingCode(number);
+            sock.__pairCodePending = true;
+            const rawCode = await sock.requestPairingCode(number);
             const clean = String(rawCode || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
             if (clean.length !== 8) return send(502, { success: false, error: 'WhatsApp did not return a valid 8-character pairing code. Please try again.' });
             const code = clean.slice(0,4) + '-' + clean.slice(4);
             recent.push(now); pairAttempts.set(ip, recent);
             return send(200, { success: true, pairingCode: code, code: code, displayCode: code, kingCode: code, state: 'pairing' });
-        } catch (error) { console.error('[pair-api] Pairing code request failed:', error?.message || error); return send(503, { success: false, error: 'Unable to generate a pairing code. Check the number and try again.' }); } finally { if (activeSocket) activeSocket.__pairCodePending = false; }
+        } catch (error) { console.error('[pair-api] Pairing code request failed:', error?.message || error); return send(503, { success: false, error: 'Unable to generate a pairing code. Check the number and try again.' }); } finally { if (sock) sock.__pairCodePending = false; }
     }
 })
 const API_PORT = Number(process.env.PORT || process.env.PAIR_API_PORT || 8000)
 pairingApi.listen(API_PORT, '0.0.0.0', () => { console.log(`Knightbot pairing engine API listening on port ${API_PORT}`) })
-startXeonBotInc().catch(error => { console.error('Fatal error:', error); process.exit(1) })
+// On boot, restart EVERY saved session - each person gets their own bot back, no sharing
+try {
+    const base = './sessions';
+    if (existsSync(base)) {
+        const folders = fs.readdirSync(base).filter(f => /^\d{8,15}$/.test(f));
+        for (const num of folders) {
+            console.log(`[KING MD] Restoring session for ${num}`);
+            startXeonBotInc(num).catch(e => console.error('Restore failed for', num, e.message));
+        }
+    } else if (existsSync('./session')) {
+        console.log('[KING MD] Found old single ./session, starting it');
+        startXeonBotInc('').catch(e => console.error(e.message));
+    }
+} catch (e) { console.error('Restore sessions error:', e.message); }
 process.on('uncaughtException', (err) => { console.error('Uncaught Exception:', err) })
 process.on('unhandledRejection', (err) => { console.error('Unhandled Rejection:', err) })
-// ✅ FIX 2: REMOVED fs.watchFile reload - that was crashing Render in a loop
