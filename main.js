@@ -1,3 +1,10 @@
+// ✅ KEEP ALIVE FOR UPTIMEROBOT - 24/7
+const express = require('express');
+const keepApp = express();
+const PORT = process.env.PORT || 3000;
+keepApp.get('/', (req, res) => res.send('KING MD V4 IS ALIVE'));
+keepApp.listen(PORT, () => console.log('Keep-alive running on ' + PORT));
+
 // 🧹 Fix for ENOSPC / temp overflow in hosted panels
 const fs = require('fs');
 const path = require('path');
