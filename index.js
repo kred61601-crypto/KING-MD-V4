@@ -45,7 +45,7 @@ setInterval(() => {
 }, 30_000)
 let owner = JSON.parse(fs.readFileSync('./data/owner.json'))
 // ===== KING MD FIXED: 1 NUMBER = 1 SESSION = 1 BOT - EVERYONE HAS OWN SESSION =====
-const sessions = new Map(); // number -> { sock, state, number, botNumber }
+const sessions = new Map();
 let activeSocket = null
 let activeBotNumber = ""
 let activeBotState = "offline"
@@ -53,24 +53,22 @@ const pairAttempts = new Map()
 global.botname = "KNIGHT BOT"
 global.themeemoji = "•"
 
-function getSession(number){
-  const n = String(number||'').replace(/\D/g,'');
-  return sessions.get(n);
-}
-function setActiveFrom(number){
-  const s = sessions.get(String(number||'').replace(/\D/g,''));
-  if(s){ activeSocket = s.sock; activeBotNumber = s.botNumber || String(number||'').replace(/\D/g,''); activeBotState = s.state || 'offline'; }
+function isNumberAlreadyRegistered(number){
+  try {
+    const credsPath = `./sessions/${number}/creds.json`;
+    if (!existsSync(credsPath)) return false;
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+    return creds && creds.registered === true;
+  } catch { return false; }
 }
 
 async function startXeonBotInc(requestNumber) {
     try {
         let { version, isLatest } = await fetchLatestBaileysVersion()
-        // If this number already has a session running, reuse it - do NOT touch other numbers
         const wanted = String(requestNumber || '').replace(/\D/g,'');
         if (wanted && sessions.has(wanted) && sessions.get(wanted).sock) {
             return sessions.get(wanted).sock;
         }
-        // Session folder is PER NUMBER - this is the fix. Each person gets own folder.
         const sessionFolder = wanted ? `./sessions/${wanted}` : `./session`;
         const { state, saveCreds } = await useMultiFileAuthState(sessionFolder)
         const msgRetryCounterCache = new NodeCache()
@@ -82,7 +80,6 @@ async function startXeonBotInc(requestNumber) {
             getMessage: async (key) => { let jid = jidNormalizedUser(key.remoteJid); let msg = await store.loadMessage(jid, key.id); return msg?.message || "" },
             msgRetryCounterCache, defaultQueryTimeoutMs: 60000, connectTimeoutMs: 60000, keepAliveIntervalMs: 10000,
         })
-        // Store THIS socket under THIS number only
         const sessionKey = wanted || 'default';
         sessions.set(sessionKey, { sock: XeonBotInc, state: 'pairing', number: wanted, botNumber: wanted });
         activeSocket = XeonBotInc
@@ -122,7 +119,6 @@ async function startXeonBotInc(requestNumber) {
             console.log(chalk.yellow(`🌿Connected to => ` + JSON.stringify(XeonBotInc.user, null, 2)))
             activeBotState = 'online'
             try { activeBotNumber = String(XeonBotInc.user.id.split(':')[0] || '').replace(/\D/g, ''); } catch {}
-            // When this bot connects, update ONLY its own session entry
             if (activeBotNumber) {
                 const realKey = activeBotNumber;
                 if (sessions.has(sessionKey) && sessionKey !== realKey) {
@@ -170,7 +166,7 @@ async function startXeonBotInc(requestNumber) {
     } catch (error) { console.error('Error in startXeonBotInc:', error); await delay(5000); startXeonBotInc(requestNumber) }
 }
 
-// ===== PAIR API + UPTIME FIX =====
+// ===== PAIR API + UPTIME ALIVE - NOT REMOVED =====
 const PAIR_BRIDGE_KEY = process.env.PAIR_BRIDGE_KEY || 'KINGMD-PAIR-BRIDGE-2026-25d149ee52d161be9b76029bda1267b7';
 const pairingApi = http.createServer(async (req, res) => {
     const allowedOrigin = process.env.PAIR_SITE_ORIGIN || '*'
@@ -182,10 +178,11 @@ const pairingApi = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
     const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
     const pathname = requestUrl.pathname
-    if (req.method === 'HEAD' || pathname === '/' || pathname === '/health' || pathname === '/api/health') {
+    // UPTIME ALIVE - STILL HERE
+    if (req.method === 'HEAD' || pathname === '/' || pathname === '/health' || pathname === '/api/health' || pathname === '/uptime') {
         res.statusCode = 200;
         if (req.method === 'HEAD') return res.end();
-        return send(200, { status: 'ok', service: 'knightbot-pairing-engine', botState: activeBotState, uptime: process.uptime() })
+        return send(200, { status: 'ok', alive: true, service: 'knightbot-pairing-engine', botState: activeBotState, sessions: sessions.size, uptime: process.uptime() })
     }
     const isPairPost = pathname === '/api/pair' && req.method === 'POST';
     const isPairGet = pathname === '/pair' && req.method === 'GET';
@@ -206,9 +203,9 @@ const pairingApi = http.createServer(async (req, res) => {
             const entry = sessions.get(n);
             if (entry) bots[n] = { state: entry.state || 'offline', connected: entry.state === 'online', updatedAt: new Date().toISOString() };
             else {
-                // Check if this number has a saved folder from before - means it was paired before
-                const folderExists = existsSync(`./sessions/${n}`) || (n === activeBotNumber && activeBotState === 'online');
-                bots[n] = { state: folderExists ? 'pairing' : 'offline', connected: false, updatedAt: new Date().toISOString() };
+                const folderExists = existsSync(`./sessions/${n}`);
+                const alreadyReg = isNumberAlreadyRegistered(n);
+                bots[n] = { state: alreadyReg ? 'online' : (folderExists ? 'pairing' : 'offline'), connected: alreadyReg, updatedAt: new Date().toISOString() };
             }
         }
         return send(200, { success: true, bots });
@@ -237,14 +234,16 @@ const pairingApi = http.createServer(async (req, res) => {
         const ip = req.socket.remoteAddress || 'unknown'; const now = Date.now();
         const recent = (pairAttempts.get(ip) || []).filter(t => now - t < 10*60*1000);
         if (recent.length >= 5) return send(429, { success: false, error: 'Too many pairing attempts. Please wait 10 minutes and try again.' });
-        // ===== KING MD FIXED: Get or create session for THIS number only =====
-        let entry = sessions.get(number);
-        let sock = entry?.sock;
-        // If THIS number is already connected, only THIS number gets ALREADY_CONNECTED
-        if (sock && sock.authState?.creds?.registered && entry?.state === 'online') {
+        // ===== FIXED: If THIS number is already connected, do NOT try to make fake code =====
+        const entryBefore = sessions.get(number);
+        if (entryBefore && entryBefore.state === 'online') {
             return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
         }
-        // If no session for THIS number, create one for THIS number - other numbers are NOT touched
+        if (isNumberAlreadyRegistered(number)) {
+            return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
+        }
+        let entry = sessions.get(number);
+        let sock = entry?.sock;
         if (!sock) {
             try { sock = await startXeonBotInc(number); entry = sessions.get(number); } catch (e) { return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' }); }
         }
@@ -252,18 +251,30 @@ const pairingApi = http.createServer(async (req, res) => {
         if (sock.__pairCodePending) return send(429, { success: false, error: 'A pairing code is already being generated for this number. Please wait.' });
         try {
             sock.__pairCodePending = true;
-            const rawCode = await sock.requestPairingCode(number);
+            if (sock.authState?.creds?.registered) {
+                return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
+            }
+            await delay(2500);
+            let rawCode = '';
+            let lastErr = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try { rawCode = await sock.requestPairingCode(number); if (rawCode) break; }
+                catch (e) { lastErr = e; console.log(`[pair] Attempt ${attempt} failed for ${number}:`, e?.message); await delay(2000); }
+            }
+            if (!rawCode) {
+                console.error('[pair-api] All attempts failed for', number, lastErr?.message);
+                return send(503, { success: false, error: 'WhatsApp is still preparing your session. Tap Generate again in 5 seconds.' });
+            }
             const clean = String(rawCode || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-            if (clean.length !== 8) return send(502, { success: false, error: 'WhatsApp did not return a valid 8-character pairing code. Please try again.' });
+            if (clean.length !== 8) return send(502, { success: false, error: 'WhatsApp did not return a valid code. Tap Generate again.' });
             const code = clean.slice(0,4) + '-' + clean.slice(4);
             recent.push(now); pairAttempts.set(ip, recent);
             return send(200, { success: true, pairingCode: code, code: code, displayCode: code, kingCode: code, state: 'pairing' });
-        } catch (error) { console.error('[pair-api] Pairing code request failed:', error?.message || error); return send(503, { success: false, error: 'Unable to generate a pairing code. Check the number and try again.' }); } finally { if (sock) sock.__pairCodePending = false; }
+        } catch (error) { console.error('[pair-api] Pairing code request failed:', error?.message || error); return send(503, { success: false, error: 'WhatsApp is still preparing your session. Tap Generate again in 5 seconds.' }); } finally { if (sock) sock.__pairCodePending = false; }
     }
 })
 const API_PORT = Number(process.env.PORT || process.env.PAIR_API_PORT || 8000)
 pairingApi.listen(API_PORT, '0.0.0.0', () => { console.log(`Knightbot pairing engine API listening on port ${API_PORT}`) })
-// On boot, restart EVERY saved session - each person gets their own bot back, no sharing
 try {
     const base = './sessions';
     if (existsSync(base)) {
