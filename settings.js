@@ -5,7 +5,7 @@ const settings = {
   author: '‎',
   botName: "Knight Bot",
   botOwner: 'Professor', // Your name
-  ownerNumber: '919876543210', //Set your number here without + symbol, just add country code & number without any space
+  ownerNumber: '254726476468', //Set your number here without + symbol, just add country code & number without any space
   giphyApiKey: 'qnl7ssQChTdPjsKta2Ax2LMaGXz303tq',
   commandMode: "public",
   maxStoreMessages: 20, 
@@ -14,9 +14,9 @@ const settings = {
   version: "3.0.8",
   updateZipUrl: "https://github.com/mruniquehacker/Knightbot-MD/archive/refs/heads/main.zip",
   // Media / Knight API (song, video, cards, etc.)
-  knightApiUrl: process.env.KNIGHT_API_URL || 'https://knightbotapi.stream',
+  knightApiUrl: process.env.KNIGHT_API_URL || 'https://king-md-v1-51j8.onrender.com',
   knightApiKey: process.env.KNIGHT_API_KEY || 'knight',
-  mediaApiUrl: process.env.MEDIA_API_URL || 'https://knightbotapi.stream',
+  mediaApiUrl: process.env.MEDIA_API_URL || 'https://king-md-v1-51j8.onrender.com',
   mediaApiKey: process.env.MEDIA_API_KEY || 'knight',
   princeApiUrl: process.env.PRINCE_API_URL || 'https://api.princetechn.com',
   princeApiKey: process.env.PRINCE_API_KEY || 'prince',
