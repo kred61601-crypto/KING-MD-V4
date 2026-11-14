@@ -72,24 +72,12 @@ setInterval(() => {
     }
 }, 30_000) // check every 30 seconds
 
-let phoneNumber = "911234567890"
 let owner = JSON.parse(fs.readFileSync('./data/owner.json'))
+let activeSocket = null
+const pairAttempts = new Map()
 
 global.botname = "KNIGHT BOT"
 global.themeemoji = "•"
-const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
-const useMobile = process.argv.includes("--mobile")
-
-// Only create readline interface if we're in an interactive environment
-const rl = process.stdin.isTTY ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null
-const question = (text) => {
-    if (rl) {
-        return new Promise((resolve) => rl.question(text, resolve))
-    } else {
-        // In non-interactive environment, use ownerNumber from settings
-        return Promise.resolve(settings.ownerNumber || phoneNumber)
-    }
-}
 
 async function startXeonBotInc() {
     try {
@@ -100,7 +88,7 @@ async function startXeonBotInc() {
         const XeonBotInc = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: !pairingCode,
+            printQRInTerminal: false,
             browser: ["Ubuntu", "Chrome", "20.0.04"],
             auth: {
                 creds: state.creds,
@@ -119,6 +107,8 @@ async function startXeonBotInc() {
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 10000,
         })
+
+        activeSocket = XeonBotInc
 
         // Save credentials when they update
         XeonBotInc.ev.on('creds.update', saveCreds)
@@ -219,40 +209,6 @@ async function startXeonBotInc() {
     XeonBotInc.public = true
 
     XeonBotInc.serializeM = (m) => smsg(XeonBotInc, m, store)
-
-    // Handle pairing code
-    if (pairingCode && !XeonBotInc.authState.creds.registered) {
-        if (useMobile) throw new Error('Cannot use pairing code with mobile api')
-
-        let phoneNumber
-        if (!!global.phoneNumber) {
-            phoneNumber = global.phoneNumber
-        } else {
-            phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number 😍\nFormat: 6281376552730 (without + or spaces) : `)))
-        }
-
-        // Clean the phone number - remove any non-digit characters
-        phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
-
-        // Validate the phone number using awesome-phonenumber
-        const pn = require('awesome-phonenumber');
-        if (!pn('+' + phoneNumber).isValid()) {
-            console.log(chalk.red('Invalid phone number. Please enter your full international number (e.g., 15551234567 for US, 447911123456 for UK, etc.) without + or spaces.'));
-            process.exit(1);
-        }
-
-        setTimeout(async () => {
-            try {
-                let code = await XeonBotInc.requestPairingCode(phoneNumber)
-                code = code?.match(/.{1,4}/g)?.join("-") || code
-                console.log(chalk.black(chalk.bgGreen(`Your Pairing Code : `)), chalk.black(chalk.white(code)))
-                console.log(chalk.yellow(`\nPlease enter this code in your WhatsApp app:\n1. Open WhatsApp\n2. Go to Settings > Linked Devices\n3. Tap "Link a Device"\n4. Enter the code shown above`))
-            } catch (error) {
-                console.error('Error requesting pairing code:', error)
-                console.log(chalk.red('Failed to get pairing code. Please check your phone number and try again.'))
-            }
-        }, 3000)
-    }
 
     // Connection handling
     XeonBotInc.ev.on('connection.update', async (s) => {
@@ -402,15 +358,60 @@ async function startXeonBotInc() {
     }
 }
 
-// ✅ ONLY ADDED PART - KEEP ALIVE FOR UPTIMEROBOT - NOTHING ELSE CHANGED
-const keepAliveServer = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('KNIGHT BOT IS ALIVE');
-});
-const KEEP_PORT = Number(process.env.PORT || 8000);
-keepAliveServer.listen(KEEP_PORT, '0.0.0.0', () => {
-    console.log(`Keep-alive listening on port ${KEEP_PORT}`);
-});
+
+// Public pairing API: the website calls this service; the bot uses the same
+// ./session auth directory, so the linked account is the account running commands.
+const pairingApi = http.createServer(async (req, res) => {
+    const allowedOrigin = process.env.PAIR_SITE_ORIGIN || '*'
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+
+    const send = (status, payload) => {
+        res.statusCode = status
+        res.end(JSON.stringify(payload))
+    }
+    if (req.method === 'OPTIONS') {
+        res.statusCode = 204
+        return res.end()
+    }
+
+    const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+    if (requestUrl.pathname === '/health') return send(200, { status: 'ok', service: 'knightbot-pairing-engine' })
+    if (requestUrl.pathname !== '/pair' || req.method !== 'GET') return send(404, { error: 'Not found' })
+
+    const ip = req.socket.remoteAddress || 'unknown'
+    const now = Date.now()
+    const recent = (pairAttempts.get(ip) || []).filter(time => now - time < 10 * 60 * 1000)
+    if (recent.length >= 5) return send(429, { error: 'Too many pairing attempts. Please wait 10 minutes and try again.' })
+
+    const number = (requestUrl.searchParams.get('number') || '').replace(/\D/g, '')
+    if (!number || number.length < 8 || number.length > 15) return send(400, { error: 'Enter a valid international WhatsApp number with country code.' })
+    if (!activeSocket) return send(503, { error: 'Pairing engine is starting. Please try again shortly.' })
+    if (activeSocket.authState?.creds?.registered) return send(409, { error: 'This engine already has a linked WhatsApp account.' })
+    if (activeSocket.__pairCodePending) return send(429, { error: 'A pairing code is already being generated. Please wait.' })
+
+    try {
+        activeSocket.__pairCodePending = true
+        const rawCode = await activeSocket.requestPairingCode(number)
+        const code = String(rawCode || '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
+        if (code.length !== 8) return send(502, { error: 'WhatsApp did not return a valid 8-character pairing code. Please try again.' })
+        recent.push(now)
+        pairAttempts.set(ip, recent)
+        return send(200, { code })
+    } catch (error) {
+        console.error('[pair-api] Pairing code request failed:', error?.message || error)
+        return send(503, { error: 'Unable to generate a pairing code. Check the number and try again.' })
+    } finally {
+        if (activeSocket) activeSocket.__pairCodePending = false
+    }
+})
+
+const API_PORT = Number(process.env.PORT || process.env.PAIR_API_PORT || 8000)
+pairingApi.listen(API_PORT, '0.0.0.0', () => {
+    console.log(`Knightbot pairing engine API listening on port ${API_PORT}`)
+})
 
 // Start the bot with error handling
 startXeonBotInc().catch(error => {
