@@ -153,7 +153,7 @@ const soraCommand = require('./commands/sora');
 // Global settings
 global.packname = settings.packname;
 global.author = settings.author;
-global.channelLink = "https://whatsapp.com/channel/0029Va90zAnIHphOuO8Msp3A";
+global.channelLink = "https://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z";
 global.ytch = "Mr Unique Hacker";
 
 // Add this near the top of main.js with other global configurations
@@ -162,8 +162,8 @@ const channelInfo = {
         forwardingScore: 1,
         isForwarded: true,
         forwardedNewsletterMessageInfo: {
-            newsletterJid: '120363161513685998@newsletter',
-            newsletterName: 'KnightBot MD',
+            newsletterJid: '120207367533840780@newsletter',
+            newsletterName: 'KING MD 👑',
             serverMessageId: -1
         }
     }
@@ -203,7 +203,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
             if (buttonId === 'channel') {
                 await sock.sendMessage(chatId, {
-                    text: '📢 *Join our Channel:*\nhttps://whatsapp.com/channel/0029Va90zAnIHphOuO8Msp3A'
+                    text: '📢 *Join our Channel:*\nhttps://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z'
                 }, { quoted: message });
                 return;
             } else if (buttonId === 'owner') {
@@ -1185,6 +1185,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.sora'):
                 await soraCommand(sock, chatId, message);
+                break;
+            case userMessage === '.view':
+                await sock.sendMessage(chatId, {
+                    text: '📢 *KING MD Channels 👑*\n\n1️⃣ Channel 1:\nhttps://whatsapp.com/channel/0029VbCwmFXDzgT4FzZm6d28\n\n2️⃣ Channel 2:\nhttps://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z',
+                    ...channelInfo
+                }, { quoted: message });
                 break;
             default:
                 if (isGroup) {
