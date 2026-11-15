@@ -5,13 +5,13 @@ async function pairCommand(sock, chatId, message, q) {
     try {
         if (!q) {
             return await sock.sendMessage(chatId, {
-                text: "Please provide valid WhatsApp number\nExample: .pair 91702395XXXX",
+                text: "Please provide valid WhatsApp number\nExample: .pair 254XXXXXXXXXX",
                 contextInfo: {
                     forwardingScore: 1,
                     isForwarded: true,
                     forwardedNewsletterMessageInfo: {
                         newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: 'KnightBot MD',
+                        newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥',
                         serverMessageId: -1
                     }
                 }
@@ -30,7 +30,7 @@ async function pairCommand(sock, chatId, message, q) {
                     isForwarded: true,
                     forwardedNewsletterMessageInfo: {
                         newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: 'KnightBot MD',
+                        newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥',
                         serverMessageId: -1
                     }
                 }
@@ -107,7 +107,7 @@ async function pairCommand(sock, chatId, message, q) {
                         isForwarded: true,
                         forwardedNewsletterMessageInfo: {
                             newsletterJid: '120363161513685998@newsletter',
-                            newsletterName: 'KnightBot MD',
+                            newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥',
                             serverMessageId: -1
                         }
                     }
@@ -123,7 +123,7 @@ async function pairCommand(sock, chatId, message, q) {
                 isForwarded: true,
                 forwardedNewsletterMessageInfo: {
                     newsletterJid: '120363161513685998@newsletter',
-                    newsletterName: 'KnightBot MD',
+                    newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥',
                     serverMessageId: -1
                 }
             }
