@@ -49,9 +49,6 @@ let activeSocket = null
 let activeBotNumber = ""
 let activeBotState = "offline"
 const pairAttempts = new Map()
-// ===== KING MD - PAIRING CODE SECURITY: code only valid if YOU requested it =====
-// WhatsApp already rejects codes you didn't request. We also track it here:
-// number -> { code, at } - expires in 60s, one-time use
 const pendingPairCodes = new Map()
 global.botname = "KING MD V4"
 global.themeemoji = "•"
@@ -75,12 +72,24 @@ function getManagePassword(botNumber){
     return all[String(botNumber).replace(/\D/g,'')] || null;
   } catch { return null; }
 }
+// ===== KING MD FIX: Kill old socket cleanly, so only 1 socket per number =====
+async function killSocketFor(number){
+  const entry = sessions.get(String(number));
+  if (!entry?.sock) return;
+  try { entry.sock.ev.removeAllListeners?.('connection.update'); } catch {}
+  try { await entry.sock.logout?.(); } catch {}
+  try { await entry.sock.end?.(); } catch {}
+  try { entry.sock.ws?.close?.(); } catch {}
+  sessions.delete(String(number));
+}
 
-async function startXeonBotInc(requestNumber) {
+async function startXeonBotInc(requestNumber, forceFresh = false) {
     try {
         let { version, isLatest } = await fetchLatestBaileysVersion()
         const wanted = String(requestNumber || '').replace(/\D/g,'');
-        if (wanted && sessions.has(wanted) && sessions.get(wanted).sock) {
+        // FIX: If forceFresh, kill old socket first - no 2 sockets fighting
+        if (wanted && forceFresh) await killSocketFor(wanted);
+        if (wanted && !forceFresh && sessions.has(wanted) && sessions.get(wanted).sock) {
             return sessions.get(wanted).sock;
         }
         const sessionFolder = wanted ? `./sessions/${wanted}` : `./session`;
@@ -88,8 +97,6 @@ async function startXeonBotInc(requestNumber) {
         const msgRetryCounterCache = new NodeCache()
         const XeonBotInc = makeWASocket({
             version, logger: pino({ level: 'silent' }), printQRInTerminal: false,
-            // ===== KING MD - REMOVED Ubuntu/Chrome, NOW USE Safari =====
-            // WhatsApp will now show: KING MD - Safari (not Ubuntu)
             browser: ["KING MD", "Safari", "17.0"],
             auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })) },
             markOnlineOnConnect: true, generateHighQualityLinkPreview: true, syncFullHistory: false,
@@ -145,10 +152,7 @@ async function startXeonBotInc(requestNumber) {
                 } else if (sessions.has(realKey)) { sessions.get(realKey).state = 'online'; sessions.get(realKey).botNumber = realKey; }
             }
             if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'online';
-            // ===== REMOVED OLD MESSAGE: KnightBot MD - Bot Connected Successfully! + Time + Make sure to join =====
-            // ===== NEW: WELCOME + PASSWORD + AUTO FOLLOW 2 CHANNELS (from main.js) =====
             try {
-                // Code is now used, delete it - one-time use
                 if (activeBotNumber) pendingPairCodes.delete(activeBotNumber);
                 await sendWelcomeWithPassword(XeonBotInc);
             } catch (error) { console.error('Error sending welcome message:', error.message) }
@@ -165,7 +169,6 @@ async function startXeonBotInc(requestNumber) {
             if (isConflict) { console.log(chalk.yellow('⚠️ Session conflict: another device/instance connected.')); return }
             if (isLoggedOut) {
                 activeBotState = 'offline';
-                // Password expires on logout - delete it
                 try { if (typeof deletePassword === 'function' && activeBotNumber) deletePassword(activeBotNumber); } catch {}
                 pendingPairCodes.delete(activeBotNumber);
                 activeBotNumber = "";
@@ -173,7 +176,18 @@ async function startXeonBotInc(requestNumber) {
                 if (sessions.has(sessionKey)) sessions.delete(sessionKey);
                 console.log(chalk.red('Session logged out. Please re-authenticate.')); return
             }
-            if (shouldReconnect) { activeBotState = 'pairing'; if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing'; await delay(5000); sessions.delete(sessionKey); startXeonBotInc(wanted) }
+            // FIX: Don't auto-reconnect a pairing socket - it kills the pairing code
+            // Only reconnect if it was already registered / online before
+            if (shouldReconnect) {
+                const wasRegistered = isNumberAlreadyRegistered(wanted);
+                if (!wasRegistered) {
+                    console.log(chalk.yellow(`[KING MD] Pairing socket closed for ${wanted}, NOT auto-reconnecting - waiting for new Generate`));
+                    activeBotState = 'pairing';
+                    if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing';
+                    return;
+                }
+                activeBotState = 'pairing'; if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing'; await delay(5000); sessions.delete(sessionKey); startXeonBotInc(wanted)
+            }
         }
     })
     const antiCallNotified = new Set();
@@ -194,7 +208,6 @@ async function startXeonBotInc(requestNumber) {
     } catch (error) { console.error('Error in startXeonBotInc:', error); await delay(5000); startXeonBotInc(requestNumber) }
 }
 
-// ===== PAIR API + UPTIME ALIVE + REAL COUNTING =====
 const PAIR_BRIDGE_KEY = process.env.PAIR_BRIDGE_KEY || 'KINGMD-PAIR-BRIDGE-2026-25d149ee52d161be9b76029bda1267b7';
 const pairingApi = http.createServer(async (req, res) => {
     const allowedOrigin = process.env.PAIR_SITE_ORIGIN || '*'
@@ -251,8 +264,7 @@ const pairingApi = http.createServer(async (req, res) => {
     }
     if (isSessionDelete) {
         const num = pathname.split('/').pop().replace(/\D/g,'');
-        const entry = sessions.get(num);
-        if (entry) { try { await entry.sock?.logout?.(); } catch {} try { await entry.sock?.end?.(); } catch {} sessions.delete(num); }
+        await killSocketFor(num);
         try { rmSync(`./sessions/${num}`, { recursive: true, force: true }); } catch {}
         try { if (typeof deletePassword === 'function') deletePassword(num); } catch {}
         pendingPairCodes.delete(num);
@@ -267,8 +279,6 @@ const pairingApi = http.createServer(async (req, res) => {
         for (const n of nums) { const entry = sessions.get(n); if (entry && entry.state === 'online') { sent = 1; break; } }
         return send(200, { success: true, reactionsSent: sent, sent: sent, error: sent ? '' : 'Channel react needs your bot to follow the channel first.' });
     }
-    // ===== MANAGE LOGIN - REAL PASSWORD CHECK =====
-    // App sends { phoneNumber, password } - we check against password bot gave on connect
     if (isManage) {
         const body = await readBody();
         if (pathname === '/api/manage-login') {
@@ -277,7 +287,6 @@ const pairingApi = http.createServer(async (req, res) => {
             if (!num || !pass) return send(400, { success: false, error: 'Enter bot number + password from your bot DM.' });
             const real = getManagePassword(num);
             if (!real) return send(401, { success: false, error: 'No password found for this number. Connect bot first, check DM for password.' });
-            // Compare ignoring spaces, like HCF 7 8 Zyk == HCF78Zyk
             const norm = s => String(s).replace(/\s+/g,'').toUpperCase();
             if (norm(pass) !== norm(real)) return send(401, { success: false, error: 'Wrong password. Type .PASSWORD in your bot to get new password.' });
             return send(200, { success: true, message: 'Password correct', number: num });
@@ -292,45 +301,52 @@ const pairingApi = http.createServer(async (req, res) => {
         const ip = req.socket.remoteAddress || 'unknown'; const now = Date.now();
         const recent = (pairAttempts.get(ip) || []).filter(t => now - t < 10*60*1000);
         if (recent.length >= 5) return send(429, { success: false, error: 'Too many pairing attempts. Please wait 10 minutes and try again.' });
+        if (isNumberAlreadyRegistered(number)) {
+            return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
+        }
         const entryBefore = sessions.get(number);
         if (entryBefore && entryBefore.state === 'online') {
             return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
         }
-        if (isNumberAlreadyRegistered(number)) {
-            return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
-        }
-        let entry = sessions.get(number);
-        let sock = entry?.sock;
-        if (!sock) {
-            try { sock = await startXeonBotInc(number); entry = sessions.get(number); } catch (e) { return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' }); }
-        }
+        // ===== KING MD FIX - THE MAIN FIX =====
+        // 1. If dead folder exists (not registered), DELETE it - don't reuse dead keys
+        // 2. Kill any old socket for this number - only 1 socket allowed
+        // 3. Create ONE fresh socket, call requestPairingCode ONCE
+        try {
+            if (existsSync(`./sessions/${number}/creds.json`) && !isNumberAlreadyRegistered(number)) {
+                console.log(`[KING MD] Deleting dead session for ${number}`);
+                await killSocketFor(number);
+                rmSync(`./sessions/${number}`, { recursive: true, force: true });
+            }
+        } catch {}
+        let sock;
+        try { sock = await startXeonBotInc(number, true); } catch (e) { return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' }); }
         if (!sock) return send(503, { success: false, error: 'Pairing engine is starting. Please try again shortly.' });
         if (sock.__pairCodePending) return send(429, { success: false, error: 'A pairing code is already being generated for this number. Please wait.' });
         try {
             sock.__pairCodePending = true;
-            if (sock.authState?.creds?.registered) {
-                return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
-            }
-            await delay(2500);
+            // Wait for socket to start connecting - but NOT too long, or code dies
+            await delay(1500);
+            // ===== CALL ONCE ONLY - NO LOOP =====
+            // Looping kills the previous code. One call = one valid code.
             let rawCode = '';
-            let lastErr = null;
-            for (let attempt = 1; attempt <= 3; attempt++) {
-                try { rawCode = await sock.requestPairingCode(number); if (rawCode) break; }
-                catch (e) { lastErr = e; console.log(`[pair] Attempt ${attempt} failed for ${number}:`, e?.message); await delay(2000); }
+            try {
+                rawCode = await sock.requestPairingCode(number);
+            } catch (e) {
+                console.log(`[pair] requestPairingCode failed for ${number}:`, e?.message);
+                // If it fails, socket is dead - recreate ONCE and try ONCE more, then stop
+                try { await killSocketFor(number); rmSync(`./sessions/${number}`, { recursive: true, force: true }); } catch {}
+                sock = await startXeonBotInc(number, true);
+                await delay(1500);
+                rawCode = await sock.requestPairingCode(number);
             }
-            if (!rawCode) {
-                console.error('[pair-api] All attempts failed for', number, lastErr?.message);
-                return send(503, { success: false, error: 'WhatsApp is still preparing your session. Tap Generate again in 5 seconds.' });
-            }
+            if (!rawCode) return send(503, { success: false, error: 'WhatsApp is still preparing your session. Tap Generate again in 5 seconds.' });
             const clean = String(rawCode || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
             if (clean.length !== 8) return send(502, { success: false, error: 'WhatsApp did not return a valid code. Tap Generate again.' });
             const code = clean.slice(0,4) + '-' + clean.slice(4);
-            // ===== KING MD SECURITY: Save code as requested, 60s expiry, one-time =====
-            // If user did NOT request via this API, there is NO entry here, WhatsApp will reject
             pendingPairCodes.set(number, { code: clean, at: Date.now() });
             setTimeout(() => { const p = pendingPairCodes.get(number); if (p && p.code === clean) pendingPairCodes.delete(number); }, 60 * 1000);
             recent.push(now); pairAttempts.set(ip, recent);
-            // Return device name so App can show KING MD - Safari before they type code
             return send(200, { success: true, pairingCode: code, code: code, displayCode: code, kingCode: code, deviceName: 'KING MD', deviceBrowser: 'Safari', state: 'pairing', expiresIn: 60 });
         } catch (error) { console.error('[pair-api] Pairing code request failed:', error?.message || error); return send(503, { success: false, error: 'WhatsApp is still preparing your session. Tap Generate again in 5 seconds.' }); } finally { if (sock) sock.__pairCodePending = false; }
     }
@@ -342,6 +358,12 @@ try {
     if (existsSync(base)) {
         const folders = fs.readdirSync(base).filter(f => /^\d{8,15}$/.test(f));
         for (const num of folders) {
+            // FIX: Only restore REGISTERED bots. Dead / never-paired folders must NOT start a socket
+            // Those dead sockets were fighting your new code and killing it
+            if (!isNumberAlreadyRegistered(num)) {
+                console.log(`[KING MD] Skipping dead session ${num} - not registered, will make fresh on Generate`);
+                continue;
+            }
             console.log(`[KING MD] Restoring session for ${num}`);
             startXeonBotInc(num).catch(e => console.error('Restore failed for', num, e.message));
         }
