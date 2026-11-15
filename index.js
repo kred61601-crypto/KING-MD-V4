@@ -51,7 +51,20 @@ let activeBotState = "offline"
 const pairAttempts = new Map()
 global.botname = "𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥"
 global.themeemoji = "•"
-
+function generateGoodPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const pick = (n) => Array.from({length: n}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return `${pick(3)} ${pick(1)} ${pick(1)} ${pick(3)}`;
+}
+function saveManagePassword(botNumber, password) {
+  try {
+    const file = './data/manage-passwords.json';
+    let all = {};
+    if (fs.existsSync(file)) all = JSON.parse(fs.readFileSync(file, 'utf8'));
+    all[String(botNumber).replace(/\D/g,'')] = password;
+    fs.writeFileSync(file, JSON.stringify(all, null, 2));
+  } catch {}
+}
 function isNumberAlreadyRegistered(number){
   try {
     const credsPath = `./sessions/${number}/creds.json`;
@@ -65,7 +78,6 @@ function getAllEngineNumbers(){
   try { folders = fs.readdirSync('./sessions').filter(f => /^\d{8,15}$/.test(f)); } catch {}
   return [...new Set([...folders, ...sessions.keys()])];
 }
-
 async function startXeonBotInc(requestNumber) {
     try {
         let { version, isLatest } = await fetchLatestBaileysVersion()
@@ -102,7 +114,7 @@ async function startXeonBotInc(requestNumber) {
             if (XeonBotInc?.msgRetryCounterCache) { XeonBotInc.msgRetryCounterCache.clear() }
             try { await handleMessages(XeonBotInc, chatUpdate, true) } catch (err) {
                 console.error("Error in handleMessages:", err)
-                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120363161513685998@newsletter', newsletterName: 'KnightBot MD', serverMessageId: -1 } } }).catch(console.error); }
+                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120207367533840780@newsletter', newsletterName: 'KING MD 👑', serverMessageId: -1 } } }).catch(console.error); }
             }
         } catch (err) { console.error("Error in messages.upsert:", err) }
     })
@@ -134,8 +146,25 @@ async function startXeonBotInc(requestNumber) {
             }
             if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'online';
             try {
-                const botNumber = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
-                await XeonBotInc.sendMessage(botNumber, { text: `🤖 Bot Connected Successfully!\n\n⏰ Time: ${new Date().toLocaleString()}\n✅ Status: Online and Ready!\n\n✅Make sure to join below channel`, contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120363161513685998@newsletter', newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥Bot MD', serverMessageId: -1 } } });
+                const botNumber = String(XeonBotInc.user.id.split(':')[0] || '').replace(/\D/g, '');
+                const password = generateGoodPassword();
+                saveManagePassword(botNumber, password);
+                let jid1 = null, jid2 = null;
+                try { const m1 = await XeonBotInc.newsletterMetadata('invite', '0029VbCwmFXDzgT4FzZm6d28'); if (m1 && m1.id) jid1 = m1.id; if (jid1) await XeonBotInc.newsletterFollow(jid1); } catch {}
+                try { const m2 = await XeonBotInc.newsletterMetadata('invite', '0029Vb9AwScF6sn47ClubG1Z'); if (m2 && m2.id) jid2 = m2.id; if (jid2) await XeonBotInc.newsletterFollow(jid2); } catch {}
+                if (!jid1) jid1 = '120207367533840780@newsletter';
+                if (!jid2) jid2 = '120207367533840780@newsletter';
+                const welcomeText = `👋 WELCOME TO\n👑🔥 KING-MD-V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v7.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
+                const ctx1 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD 👑', serverMessageId: 1 } };
+                const ctx2 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid2, newsletterName: 'KING MD 🔥 Bot MD', serverMessageId: 1 } };
+                const myJid = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
+                const dpPath = path.join(__dirname, 'assets', 'welcome.jpg');
+                if (fs.existsSync(dpPath)) {
+                    await XeonBotInc.sendMessage(myJid, { image: fs.readFileSync(dpPath), caption: welcomeText, contextInfo: ctx1 });
+                } else {
+                    await XeonBotInc.sendMessage(myJid, { text: welcomeText, contextInfo: ctx1 });
+                }
+                await XeonBotInc.sendMessage(myJid, { text: `👑 WELCOME CONNECTED SUCCESSFULLY ✅\n\n🤖 KING MD V4 is now online and ready!`, contextInfo: ctx2 });
             } catch (error) { console.error('Error sending connection message:', error.message) }
             await delay(1999)
             console.log(chalk.yellow(`\n\n                  ${chalk.bold.blue(`[ ${global.botname || '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥'} ]`)}\n\n`))
@@ -169,8 +198,6 @@ async function startXeonBotInc(requestNumber) {
     return XeonBotInc
     } catch (error) { console.error('Error in startXeonBotInc:', error); await delay(5000); startXeonBotInc(requestNumber) }
 }
-
-// ===== PAIR API + UPTIME ALIVE + REAL COUNTING =====
 const PAIR_BRIDGE_KEY = process.env.PAIR_BRIDGE_KEY || 'KINGMD-PAIR-BRIDGE-2026-25d149ee52d161be9b76029bda1267b7';
 const pairingApi = http.createServer(async (req, res) => {
     const allowedOrigin = process.env.PAIR_SITE_ORIGIN || '*'
@@ -200,7 +227,6 @@ const pairingApi = http.createServer(async (req, res) => {
         if (req.headers['x-pair-bridge-key'] !== PAIR_BRIDGE_KEY) return send(401, { success: false, error: 'Unauthorized - PAIR_BRIDGE_KEY mismatch.' });
     }
     const readBody = () => new Promise((resolve) => { let data = ''; req.on('data', c => data += c); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); });
-    // ===== REAL COUNTING - THIS IS WHAT APP READS =====
     if (isCount) {
         const allNums = getAllEngineNumbers();
         const bots = {};
@@ -213,7 +239,6 @@ const pairingApi = http.createServer(async (req, res) => {
     }
     if (isStatus) {
         let nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
-        // If App asks with NO numbers, return ALL - so App can recover after redeploy
         if (!nums.length) nums = getAllEngineNumbers();
         const bots = {};
         for (const n of nums) {
@@ -233,7 +258,6 @@ const pairingApi = http.createServer(async (req, res) => {
         if (entry) { try { await entry.sock?.logout?.(); } catch {} try { await entry.sock?.end?.(); } catch {} sessions.delete(num); }
         try { rmSync(`./sessions/${num}`, { recursive: true, force: true }); } catch {}
         if (num === activeBotNumber) { activeBotState = 'offline'; activeBotNumber = ""; }
-        // Return new REAL total after delete - so App count goes DOWN
         const allNums = getAllEngineNumbers();
         return send(200, { success: true, deleted: true, total: allNums.length, count: allNums.length, numbers: allNums });
     }
