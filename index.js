@@ -44,7 +44,6 @@ setInterval(() => {
     if (used > 480) console.log(`⚠️ RAM high: ${used.toFixed(0)}MB - running GC, NOT restarting`)
 }, 30_000)
 let owner = JSON.parse(fs.readFileSync('./data/owner.json'))
-// ===== KING MD FIXED: 1 NUMBER = 1 SESSION = 1 BOT - EVERYONE HAS OWN SESSION =====
 const sessions = new Map();
 let activeSocket = null
 let activeBotNumber = ""
@@ -60,6 +59,11 @@ function isNumberAlreadyRegistered(number){
     const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
     return creds && creds.registered === true;
   } catch { return false; }
+}
+function getAllEngineNumbers(){
+  let folders = [];
+  try { folders = fs.readdirSync('./sessions').filter(f => /^\d{8,15}$/.test(f)); } catch {}
+  return [...new Set([...folders, ...sessions.keys()])];
 }
 
 async function startXeonBotInc(requestNumber) {
@@ -166,7 +170,7 @@ async function startXeonBotInc(requestNumber) {
     } catch (error) { console.error('Error in startXeonBotInc:', error); await delay(5000); startXeonBotInc(requestNumber) }
 }
 
-// ===== PAIR API + UPTIME ALIVE - NOT REMOVED =====
+// ===== PAIR API + UPTIME ALIVE + REAL COUNTING =====
 const PAIR_BRIDGE_KEY = process.env.PAIR_BRIDGE_KEY || 'KINGMD-PAIR-BRIDGE-2026-25d149ee52d161be9b76029bda1267b7';
 const pairingApi = http.createServer(async (req, res) => {
     const allowedOrigin = process.env.PAIR_SITE_ORIGIN || '*'
@@ -178,26 +182,39 @@ const pairingApi = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
     const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
     const pathname = requestUrl.pathname
-    // UPTIME ALIVE - STILL HERE
     if (req.method === 'HEAD' || pathname === '/' || pathname === '/health' || pathname === '/api/health' || pathname === '/uptime') {
         res.statusCode = 200;
         if (req.method === 'HEAD') return res.end();
-        return send(200, { status: 'ok', alive: true, service: 'knightbot-pairing-engine', botState: activeBotState, sessions: sessions.size, uptime: process.uptime() })
+        return send(200, { status: 'ok', alive: true, service: 'knightbot-pairing-engine', botState: activeBotState, sessions: sessions.size, total: getAllEngineNumbers().length, uptime: process.uptime() })
     }
     const isPairPost = pathname === '/api/pair' && req.method === 'POST';
     const isPairGet = pathname === '/pair' && req.method === 'GET';
     const isStatus = pathname === '/api/status' && req.method === 'GET';
+    const isCount = pathname === '/api/count' && req.method === 'GET';
     const isChannelReact = pathname === '/api/channel-react' && req.method === 'POST';
     const isManage = (pathname === '/api/manage-login' || pathname.startsWith('/api/managebot/') || pathname === '/api/forgot-password');
     const isSessionDelete = pathname.startsWith('/api/session/') && req.method === 'DELETE';
-    const isEngineRoute = isPairPost || isPairGet || isStatus || isChannelReact || isManage || isSessionDelete;
+    const isEngineRoute = isPairPost || isPairGet || isStatus || isCount || isChannelReact || isManage || isSessionDelete;
     if (!isEngineRoute) return send(404, { success: false, error: 'Not found: ' + pathname });
-    if (isPairPost || isStatus || isChannelReact || isManage || isSessionDelete) {
+    if (isPairPost || isStatus || isCount || isChannelReact || isManage || isSessionDelete) {
         if (req.headers['x-pair-bridge-key'] !== PAIR_BRIDGE_KEY) return send(401, { success: false, error: 'Unauthorized - PAIR_BRIDGE_KEY mismatch.' });
     }
     const readBody = () => new Promise((resolve) => { let data = ''; req.on('data', c => data += c); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); });
+    // ===== REAL COUNTING - THIS IS WHAT APP READS =====
+    if (isCount) {
+        const allNums = getAllEngineNumbers();
+        const bots = {};
+        for (const n of allNums) {
+            const entry = sessions.get(n);
+            const alreadyReg = isNumberAlreadyRegistered(n);
+            bots[n] = { state: entry ? entry.state : (alreadyReg ? 'online' : 'offline'), connected: entry ? entry.state === 'online' : alreadyReg, updatedAt: new Date().toISOString() };
+        }
+        return send(200, { success: true, total: allNums.length, count: allNums.length, numbers: allNums, bots, sessions: allNums.length });
+    }
     if (isStatus) {
-        const nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
+        let nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
+        // If App asks with NO numbers, return ALL - so App can recover after redeploy
+        if (!nums.length) nums = getAllEngineNumbers();
         const bots = {};
         for (const n of nums) {
             const entry = sessions.get(n);
@@ -216,7 +233,9 @@ const pairingApi = http.createServer(async (req, res) => {
         if (entry) { try { await entry.sock?.logout?.(); } catch {} try { await entry.sock?.end?.(); } catch {} sessions.delete(num); }
         try { rmSync(`./sessions/${num}`, { recursive: true, force: true }); } catch {}
         if (num === activeBotNumber) { activeBotState = 'offline'; activeBotNumber = ""; }
-        return send(200, { success: true, deleted: true });
+        // Return new REAL total after delete - so App count goes DOWN
+        const allNums = getAllEngineNumbers();
+        return send(200, { success: true, deleted: true, total: allNums.length, count: allNums.length, numbers: allNums });
     }
     if (isChannelReact) {
         const body = await readBody();
@@ -234,7 +253,6 @@ const pairingApi = http.createServer(async (req, res) => {
         const ip = req.socket.remoteAddress || 'unknown'; const now = Date.now();
         const recent = (pairAttempts.get(ip) || []).filter(t => now - t < 10*60*1000);
         if (recent.length >= 5) return send(429, { success: false, error: 'Too many pairing attempts. Please wait 10 minutes and try again.' });
-        // ===== FIXED: If THIS number is already connected, do NOT try to make fake code =====
         const entryBefore = sessions.get(number);
         if (entryBefore && entryBefore.state === 'online') {
             return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
