@@ -72,7 +72,6 @@ function getManagePassword(botNumber){
     return all[String(botNumber).replace(/\D/g,'')] || null;
   } catch { return null; }
 }
-// ===== KING MD FIX: Kill old socket cleanly, so only 1 socket per number =====
 async function killSocketFor(number){
   const entry = sessions.get(String(number));
   if (!entry?.sock) return;
@@ -87,7 +86,6 @@ async function startXeonBotInc(requestNumber, forceFresh = false) {
     try {
         let { version, isLatest } = await fetchLatestBaileysVersion()
         const wanted = String(requestNumber || '').replace(/\D/g,'');
-        // FIX: If forceFresh, kill old socket first - no 2 sockets fighting
         if (wanted && forceFresh) await killSocketFor(wanted);
         if (wanted && !forceFresh && sessions.has(wanted) && sessions.get(wanted).sock) {
             return sessions.get(wanted).sock;
@@ -97,7 +95,8 @@ async function startXeonBotInc(requestNumber, forceFresh = false) {
         const msgRetryCounterCache = new NodeCache()
         const XeonBotInc = makeWASocket({
             version, logger: pino({ level: 'silent' }), printQRInTerminal: false,
-            browser: ["KING MD", "Safari", "17.0"],
+            // KING MD V4 - Safari for linking, WhatsApp accepts Mac OS. Bot name stays KING MD V4.
+            browser: ["Mac OS", "Safari", "17.0"],
             auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })) },
             markOnlineOnConnect: true, generateHighQualityLinkPreview: true, syncFullHistory: false,
             getMessage: async (key) => { let jid = jidNormalizedUser(key.remoteJid); let msg = await store.loadMessage(jid, key.id); return msg?.message || "" },
@@ -176,8 +175,6 @@ async function startXeonBotInc(requestNumber, forceFresh = false) {
                 if (sessions.has(sessionKey)) sessions.delete(sessionKey);
                 console.log(chalk.red('Session logged out. Please re-authenticate.')); return
             }
-            // FIX: Don't auto-reconnect a pairing socket - it kills the pairing code
-            // Only reconnect if it was already registered / online before
             if (shouldReconnect) {
                 const wasRegistered = isNumberAlreadyRegistered(wanted);
                 if (!wasRegistered) {
@@ -308,10 +305,6 @@ const pairingApi = http.createServer(async (req, res) => {
         if (entryBefore && entryBefore.state === 'online') {
             return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'Already connected' });
         }
-        // ===== KING MD FIX - THE MAIN FIX =====
-        // 1. If dead folder exists (not registered), DELETE it - don't reuse dead keys
-        // 2. Kill any old socket for this number - only 1 socket allowed
-        // 3. Create ONE fresh socket, call requestPairingCode ONCE
         try {
             if (existsSync(`./sessions/${number}/creds.json`) && !isNumberAlreadyRegistered(number)) {
                 console.log(`[KING MD] Deleting dead session for ${number}`);
@@ -325,16 +318,12 @@ const pairingApi = http.createServer(async (req, res) => {
         if (sock.__pairCodePending) return send(429, { success: false, error: 'A pairing code is already being generated for this number. Please wait.' });
         try {
             sock.__pairCodePending = true;
-            // Wait for socket to start connecting - but NOT too long, or code dies
             await delay(1500);
-            // ===== CALL ONCE ONLY - NO LOOP =====
-            // Looping kills the previous code. One call = one valid code.
             let rawCode = '';
             try {
                 rawCode = await sock.requestPairingCode(number);
             } catch (e) {
                 console.log(`[pair] requestPairingCode failed for ${number}:`, e?.message);
-                // If it fails, socket is dead - recreate ONCE and try ONCE more, then stop
                 try { await killSocketFor(number); rmSync(`./sessions/${number}`, { recursive: true, force: true }); } catch {}
                 sock = await startXeonBotInc(number, true);
                 await delay(1500);
@@ -358,8 +347,6 @@ try {
     if (existsSync(base)) {
         const folders = fs.readdirSync(base).filter(f => /^\d{8,15}$/.test(f));
         for (const num of folders) {
-            // FIX: Only restore REGISTERED bots. Dead / never-paired folders must NOT start a socket
-            // Those dead sockets were fighting your new code and killing it
             if (!isNumberAlreadyRegistered(num)) {
                 console.log(`[KING MD] Skipping dead session ${num} - not registered, will make fresh on Generate`);
                 continue;
