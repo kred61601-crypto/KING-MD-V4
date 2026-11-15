@@ -6,7 +6,7 @@ const chalk = require('chalk')
 const FileType = require('file-type')
 const path = require('path')
 const axios = require('axios')
-const { handleMessages, handleGroupParticipantUpdate, handleStatus } = require('./main');
+const { handleMessages, handleGroupParticipantUpdate, handleStatus, sendWelcomeWithPassword, deletePassword } = require('./main');
 const { handleAntibotDetection } = require('./commands/antibot');
 const PhoneNumber = require('awesome-phonenumber')
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
@@ -49,7 +49,11 @@ let activeSocket = null
 let activeBotNumber = ""
 let activeBotState = "offline"
 const pairAttempts = new Map()
-global.botname = "KNIGHT BOT"
+// ===== KING MD - PAIRING CODE SECURITY: code only valid if YOU requested it =====
+// WhatsApp already rejects codes you didn't request. We also track it here:
+// number -> { code, at } - expires in 60s, one-time use
+const pendingPairCodes = new Map()
+global.botname = "KING MD V4"
 global.themeemoji = "•"
 
 function isNumberAlreadyRegistered(number){
@@ -65,6 +69,12 @@ function getAllEngineNumbers(){
   try { folders = fs.readdirSync('./sessions').filter(f => /^\d{8,15}$/.test(f)); } catch {}
   return [...new Set([...folders, ...sessions.keys()])];
 }
+function getManagePassword(botNumber){
+  try {
+    const all = JSON.parse(fs.readFileSync('./data/manage-passwords.json','utf8'));
+    return all[String(botNumber).replace(/\D/g,'')] || null;
+  } catch { return null; }
+}
 
 async function startXeonBotInc(requestNumber) {
     try {
@@ -78,7 +88,9 @@ async function startXeonBotInc(requestNumber) {
         const msgRetryCounterCache = new NodeCache()
         const XeonBotInc = makeWASocket({
             version, logger: pino({ level: 'silent' }), printQRInTerminal: false,
-            browser: ["Ubuntu", "Chrome", "20.0.04"],
+            // ===== KING MD - REMOVED Ubuntu/Chrome, NOW USE Safari =====
+            // WhatsApp will now show: KING MD - Safari (not Ubuntu)
+            browser: ["KING MD", "Safari", "17.0"],
             auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })) },
             markOnlineOnConnect: true, generateHighQualityLinkPreview: true, syncFullHistory: false,
             getMessage: async (key) => { let jid = jidNormalizedUser(key.remoteJid); let msg = await store.loadMessage(jid, key.id); return msg?.message || "" },
@@ -102,7 +114,7 @@ async function startXeonBotInc(requestNumber) {
             if (XeonBotInc?.msgRetryCounterCache) { XeonBotInc.msgRetryCounterCache.clear() }
             try { await handleMessages(XeonBotInc, chatUpdate, true) } catch (err) {
                 console.error("Error in handleMessages:", err)
-                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120363161513685998@newsletter', newsletterName: 'KnightBot MD', serverMessageId: -1 } } }).catch(console.error); }
+                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120363161513685998@newsletter', newsletterName: 'KING MD V4', serverMessageId: -1 } } }).catch(console.error); }
             }
         } catch (err) { console.error("Error in messages.upsert:", err) }
     })
@@ -133,12 +145,15 @@ async function startXeonBotInc(requestNumber) {
                 } else if (sessions.has(realKey)) { sessions.get(realKey).state = 'online'; sessions.get(realKey).botNumber = realKey; }
             }
             if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'online';
+            // ===== REMOVED OLD MESSAGE: KnightBot MD - Bot Connected Successfully! + Time + Make sure to join =====
+            // ===== NEW: WELCOME + PASSWORD + AUTO FOLLOW 2 CHANNELS (from main.js) =====
             try {
-                const botNumber = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
-                await XeonBotInc.sendMessage(botNumber, { text: `🤖 Bot Connected Successfully!\n\n⏰ Time: ${new Date().toLocaleString()}\n✅ Status: Online and Ready!\n\n✅Make sure to join below channel`, contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120363161513685998@newsletter', newsletterName: 'KnightBot MD', serverMessageId: -1 } } });
-            } catch (error) { console.error('Error sending connection message:', error.message) }
+                // Code is now used, delete it - one-time use
+                if (activeBotNumber) pendingPairCodes.delete(activeBotNumber);
+                await sendWelcomeWithPassword(XeonBotInc);
+            } catch (error) { console.error('Error sending welcome message:', error.message) }
             await delay(1999)
-            console.log(chalk.yellow(`\n\n                  ${chalk.bold.blue(`[ ${global.botname || 'KNIGHT BOT'} ]`)}\n\n`))
+            console.log(chalk.yellow(`\n\n                  ${chalk.bold.blue(`[ ${global.botname || 'KING MD V4'} ]`)}\n\n`))
             console.log(chalk.green(`${global.themeemoji || '•'} 🤖 Bot Connected Successfully! ✅`)); console.log(chalk.blue(`Bot Version: ${settings.version}`))
         }
         if (connection === 'close') {
@@ -148,7 +163,16 @@ async function startXeonBotInc(requestNumber) {
             const shouldReconnect = !isLoggedOut && !isConflict
             console.log(chalk.red(`Connection closed due to ${lastDisconnect?.error}, reconnecting ${shouldReconnect}`))
             if (isConflict) { console.log(chalk.yellow('⚠️ Session conflict: another device/instance connected.')); return }
-            if (isLoggedOut) { activeBotState = 'offline'; activeBotNumber = ""; try { rmSync(sessionFolder, { recursive: true, force: true }); } catch {} if (sessions.has(sessionKey)) sessions.delete(sessionKey); console.log(chalk.red('Session logged out. Please re-authenticate.')); return }
+            if (isLoggedOut) {
+                activeBotState = 'offline';
+                // Password expires on logout - delete it
+                try { if (typeof deletePassword === 'function' && activeBotNumber) deletePassword(activeBotNumber); } catch {}
+                pendingPairCodes.delete(activeBotNumber);
+                activeBotNumber = "";
+                try { rmSync(sessionFolder, { recursive: true, force: true }); } catch {}
+                if (sessions.has(sessionKey)) sessions.delete(sessionKey);
+                console.log(chalk.red('Session logged out. Please re-authenticate.')); return
+            }
             if (shouldReconnect) { activeBotState = 'pairing'; if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing'; await delay(5000); sessions.delete(sessionKey); startXeonBotInc(wanted) }
         }
     })
@@ -185,7 +209,7 @@ const pairingApi = http.createServer(async (req, res) => {
     if (req.method === 'HEAD' || pathname === '/' || pathname === '/health' || pathname === '/api/health' || pathname === '/uptime') {
         res.statusCode = 200;
         if (req.method === 'HEAD') return res.end();
-        return send(200, { status: 'ok', alive: true, service: 'knightbot-pairing-engine', botState: activeBotState, sessions: sessions.size, total: getAllEngineNumbers().length, uptime: process.uptime() })
+        return send(200, { status: 'ok', alive: true, service: 'king-md-v4-pairing-engine', botState: activeBotState, sessions: sessions.size, total: getAllEngineNumbers().length, uptime: process.uptime() })
     }
     const isPairPost = pathname === '/api/pair' && req.method === 'POST';
     const isPairGet = pathname === '/pair' && req.method === 'GET';
@@ -200,7 +224,6 @@ const pairingApi = http.createServer(async (req, res) => {
         if (req.headers['x-pair-bridge-key'] !== PAIR_BRIDGE_KEY) return send(401, { success: false, error: 'Unauthorized - PAIR_BRIDGE_KEY mismatch.' });
     }
     const readBody = () => new Promise((resolve) => { let data = ''; req.on('data', c => data += c); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); });
-    // ===== REAL COUNTING - THIS IS WHAT APP READS =====
     if (isCount) {
         const allNums = getAllEngineNumbers();
         const bots = {};
@@ -213,7 +236,6 @@ const pairingApi = http.createServer(async (req, res) => {
     }
     if (isStatus) {
         let nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
-        // If App asks with NO numbers, return ALL - so App can recover after redeploy
         if (!nums.length) nums = getAllEngineNumbers();
         const bots = {};
         for (const n of nums) {
@@ -232,8 +254,9 @@ const pairingApi = http.createServer(async (req, res) => {
         const entry = sessions.get(num);
         if (entry) { try { await entry.sock?.logout?.(); } catch {} try { await entry.sock?.end?.(); } catch {} sessions.delete(num); }
         try { rmSync(`./sessions/${num}`, { recursive: true, force: true }); } catch {}
+        try { if (typeof deletePassword === 'function') deletePassword(num); } catch {}
+        pendingPairCodes.delete(num);
         if (num === activeBotNumber) { activeBotState = 'offline'; activeBotNumber = ""; }
-        // Return new REAL total after delete - so App count goes DOWN
         const allNums = getAllEngineNumbers();
         return send(200, { success: true, deleted: true, total: allNums.length, count: allNums.length, numbers: allNums });
     }
@@ -244,7 +267,23 @@ const pairingApi = http.createServer(async (req, res) => {
         for (const n of nums) { const entry = sessions.get(n); if (entry && entry.state === 'online') { sent = 1; break; } }
         return send(200, { success: true, reactionsSent: sent, sent: sent, error: sent ? '' : 'Channel react needs your bot to follow the channel first.' });
     }
-    if (isManage) return send(200, { success: true, message: 'Manage login is handled on website.' });
+    // ===== MANAGE LOGIN - REAL PASSWORD CHECK =====
+    // App sends { phoneNumber, password } - we check against password bot gave on connect
+    if (isManage) {
+        const body = await readBody();
+        if (pathname === '/api/manage-login') {
+            const num = String(body.phoneNumber || body.number || '').replace(/\D/g,'');
+            const pass = String(body.password || body.managePassword || '').trim();
+            if (!num || !pass) return send(400, { success: false, error: 'Enter bot number + password from your bot DM.' });
+            const real = getManagePassword(num);
+            if (!real) return send(401, { success: false, error: 'No password found for this number. Connect bot first, check DM for password.' });
+            // Compare ignoring spaces, like HCF 7 8 Zyk == HCF78Zyk
+            const norm = s => String(s).replace(/\s+/g,'').toUpperCase();
+            if (norm(pass) !== norm(real)) return send(401, { success: false, error: 'Wrong password. Type .PASSWORD in your bot to get new password.' });
+            return send(200, { success: true, message: 'Password correct', number: num });
+        }
+        return send(200, { success: true, message: 'Manage login is handled on website.' });
+    }
     if (isPairPost || isPairGet) {
         let number = '';
         if (isPairPost) { const body = await readBody(); number = String(body.phoneNumber || body.number || '').replace(/\D/g, ''); } else { number = (requestUrl.searchParams.get('number') || requestUrl.searchParams.get('phoneNumber') || '').replace(/\D/g, ''); }
@@ -286,13 +325,18 @@ const pairingApi = http.createServer(async (req, res) => {
             const clean = String(rawCode || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
             if (clean.length !== 8) return send(502, { success: false, error: 'WhatsApp did not return a valid code. Tap Generate again.' });
             const code = clean.slice(0,4) + '-' + clean.slice(4);
+            // ===== KING MD SECURITY: Save code as requested, 60s expiry, one-time =====
+            // If user did NOT request via this API, there is NO entry here, WhatsApp will reject
+            pendingPairCodes.set(number, { code: clean, at: Date.now() });
+            setTimeout(() => { const p = pendingPairCodes.get(number); if (p && p.code === clean) pendingPairCodes.delete(number); }, 60 * 1000);
             recent.push(now); pairAttempts.set(ip, recent);
-            return send(200, { success: true, pairingCode: code, code: code, displayCode: code, kingCode: code, state: 'pairing' });
+            // Return device name so App can show KING MD - Safari before they type code
+            return send(200, { success: true, pairingCode: code, code: code, displayCode: code, kingCode: code, deviceName: 'KING MD', deviceBrowser: 'Safari', state: 'pairing', expiresIn: 60 });
         } catch (error) { console.error('[pair-api] Pairing code request failed:', error?.message || error); return send(503, { success: false, error: 'WhatsApp is still preparing your session. Tap Generate again in 5 seconds.' }); } finally { if (sock) sock.__pairCodePending = false; }
     }
 })
 const API_PORT = Number(process.env.PORT || process.env.PAIR_API_PORT || 8000)
-pairingApi.listen(API_PORT, '0.0.0.0', () => { console.log(`Knightbot pairing engine API listening on port ${API_PORT}`) })
+pairingApi.listen(API_PORT, '0.0.0.0', () => { console.log(`KING MD V4 pairing engine API listening on port ${API_PORT}`) })
 try {
     const base = './sessions';
     if (existsSync(base)) {
