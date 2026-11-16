@@ -163,7 +163,7 @@ const channelInfo = {
         isForwarded: true,
         forwardedNewsletterMessageInfo: {
             newsletterJid: '120207367533840780@newsletter',
-            newsletterName: 'KING MD 👑',
+            newsletterName: 'KING MD V4',
             serverMessageId: -1
         }
     }
@@ -1188,7 +1188,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage === '.view':
                 await sock.sendMessage(chatId, {
-                    text: '📢 *KING MD Channels 👑*\n\n1️⃣ Channel 1:\nhttps://whatsapp.com/channel/0029VbCwmFXDzgT4FzZm6d28\n\n2️⃣ Channel 2:\nhttps://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z',
+                    text: '📢 *KING MD V4 Channels 👑*\n\n1️⃣ Channel 1:\nhttps://whatsapp.com/channel/0029VbCwmFXDzgT4FzZm6d28\n\n2️⃣ Channel 2:\nhttps://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z',
                     ...channelInfo
                 }, { quoted: message });
                 break;

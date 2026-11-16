@@ -6,6 +6,7 @@ const chalk = require('chalk')
 const FileType = require('file-type')
 const path = require('path')
 const axios = require('axios')
+const QRCode = require('qrcode')
 const { handleMessages, handleGroupParticipantUpdate, handleStatus } = require('./main');
 const { handleAntibotDetection } = require('./commands/antibot');
 const PhoneNumber = require('awesome-phonenumber')
@@ -49,7 +50,7 @@ let activeSocket = null
 let activeBotNumber = ""
 let activeBotState = "offline"
 const pairAttempts = new Map()
-global.botname = "𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥"
+global.botname = "KING MD V4"
 global.themeemoji = "•"
 function generateGoodPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -114,7 +115,7 @@ async function startXeonBotInc(requestNumber) {
             if (XeonBotInc?.msgRetryCounterCache) { XeonBotInc.msgRetryCounterCache.clear() }
             try { await handleMessages(XeonBotInc, chatUpdate, true) } catch (err) {
                 console.error("Error in handleMessages:", err)
-                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120207367533840780@newsletter', newsletterName: 'KING MD 👑', serverMessageId: -1 } } }).catch(console.error); }
+                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120207367533840780@newsletter', newsletterName: 'KING MD V4', serverMessageId: -1 } } }).catch(console.error); }
             }
         } catch (err) { console.error("Error in messages.upsert:", err) }
     })
@@ -129,7 +130,7 @@ async function startXeonBotInc(requestNumber) {
     XeonBotInc.public = true; XeonBotInc.serializeM = (m) => smsg(XeonBotInc, m, store)
     XeonBotInc.ev.on('connection.update', async (s) => {
         const { connection, lastDisconnect, qr } = s
-        if (qr) { console.log(chalk.yellow('📱 QR Code generated. Please scan with WhatsApp.')) }
+        if (qr) { const liveEntry = sessions.get(sessionKey); if (liveEntry) { liveEntry.qr = qr; liveEntry.qrUpdatedAt = Date.now(); } console.log(chalk.yellow('📱 QR Code generated. Please scan with WhatsApp.')) }
         if (connection === 'connecting') { console.log(chalk.yellow('🔄 Connecting to WhatsApp...')); activeBotState = 'pairing'; if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'pairing'; }
         if (connection == "open") {
             console.log(chalk.yellow(`🌿Connected to => ` + JSON.stringify(XeonBotInc.user, null, 2)))
@@ -154,9 +155,9 @@ async function startXeonBotInc(requestNumber) {
                 try { const m2 = await XeonBotInc.newsletterMetadata('invite', '0029Vb9AwScF6sn47ClubG1Z'); if (m2 && m2.id) jid2 = m2.id; if (jid2) await XeonBotInc.newsletterFollow(jid2); } catch {}
                 if (!jid1) jid1 = '120207367533840780@newsletter';
                 if (!jid2) jid2 = '120207367533840780@newsletter';
-                const welcomeText = `👋 WELCOME TO\n👑🔥 KING-MD-V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v7.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
-                const ctx1 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD 👑', serverMessageId: 1 } };
-                const ctx2 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid2, newsletterName: 'KING MD 🔥 Bot MD', serverMessageId: 1 } };
+                const welcomeText = `👋 WELCOME TO\n👑🔥 KING MD V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v7.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
+                const ctx1 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD V4', serverMessageId: 1 } };
+                const ctx2 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid2, newsletterName: 'KING MD V4 🔥 Bot MD', serverMessageId: 1 } };
                 const myJid = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
                 const dpPath = path.join(__dirname, 'assets', 'welcome.jpg');
                 if (fs.existsSync(dpPath)) {
@@ -167,7 +168,7 @@ async function startXeonBotInc(requestNumber) {
                 await XeonBotInc.sendMessage(myJid, { text: `👑 WELCOME CONNECTED SUCCESSFULLY ✅\n\n🤖 KING MD V4 is now online and ready!`, contextInfo: ctx2 });
             } catch (error) { console.error('Error sending connection message:', error.message) }
             await delay(1999)
-            console.log(chalk.yellow(`\n\n                  ${chalk.bold.blue(`[ ${global.botname || '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥'} ]`)}\n\n`))
+            console.log(chalk.yellow(`\n\n                  ${chalk.bold.blue(`[ ${global.botname || 'KING MD V4'} ]`)}\n\n`))
             console.log(chalk.green(`${global.themeemoji || '•'} 🤖 Bot Connected Successfully! ✅`)); console.log(chalk.blue(`Bot Version: ${settings.version}`))
         }
         if (connection === 'close') {
@@ -212,18 +213,19 @@ const pairingApi = http.createServer(async (req, res) => {
     if (req.method === 'HEAD' || pathname === '/' || pathname === '/health' || pathname === '/api/health' || pathname === '/uptime') {
         res.statusCode = 200;
         if (req.method === 'HEAD') return res.end();
-        return send(200, { status: 'ok', alive: true, service: 'knightbot-pairing-engine', botState: activeBotState, sessions: sessions.size, total: getAllEngineNumbers().length, uptime: process.uptime() })
+        return send(200, { status: 'ok', alive: true, service: 'king-md-v4-pairing-engine', botState: activeBotState, sessions: sessions.size, total: getAllEngineNumbers().length, uptime: process.uptime() })
     }
     const isPairPost = pathname === '/api/pair' && req.method === 'POST';
     const isPairGet = pathname === '/pair' && req.method === 'GET';
+    const isQrGet = pathname === '/api/qr' && req.method === 'GET';
     const isStatus = pathname === '/api/status' && req.method === 'GET';
     const isCount = pathname === '/api/count' && req.method === 'GET';
     const isChannelReact = pathname === '/api/channel-react' && req.method === 'POST';
     const isManage = (pathname === '/api/manage-login' || pathname.startsWith('/api/managebot/') || pathname === '/api/forgot-password');
     const isSessionDelete = pathname.startsWith('/api/session/') && req.method === 'DELETE';
-    const isEngineRoute = isPairPost || isPairGet || isStatus || isCount || isChannelReact || isManage || isSessionDelete;
+    const isEngineRoute = isPairPost || isPairGet || isQrGet || isStatus || isCount || isChannelReact || isManage || isSessionDelete;
     if (!isEngineRoute) return send(404, { success: false, error: 'Not found: ' + pathname });
-    if (isPairPost || isStatus || isCount || isChannelReact || isManage || isSessionDelete) {
+    if (isPairPost || isQrGet || isStatus || isCount || isChannelReact || isManage || isSessionDelete) {
         if (req.headers['x-pair-bridge-key'] !== PAIR_BRIDGE_KEY) return send(401, { success: false, error: 'Unauthorized - PAIR_BRIDGE_KEY mismatch.' });
     }
     const readBody = () => new Promise((resolve) => { let data = ''; req.on('data', c => data += c); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); });
@@ -236,6 +238,30 @@ const pairingApi = http.createServer(async (req, res) => {
             bots[n] = { state: entry ? entry.state : (alreadyReg ? 'online' : 'offline'), connected: entry ? entry.state === 'online' : alreadyReg, updatedAt: new Date().toISOString() };
         }
         return send(200, { success: true, total: allNums.length, count: allNums.length, numbers: allNums, bots, sessions: allNums.length });
+    }
+    if (isQrGet) {
+        const number = String(requestUrl.searchParams.get('number') || '').replace(/\D/g, '');
+        if (!/^\d{8,15}$/.test(number)) return send(400, { success: false, error: 'Enter a valid WhatsApp number first.' });
+        if (isNumberAlreadyRegistered(number)) return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This number is already connected.' });
+        try {
+            let entry = sessions.get(number);
+            if (entry && entry.state === 'online') return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This number is already connected.' });
+            if (!entry || !entry.sock) {
+                await startXeonBotInc(number);
+                entry = sessions.get(number);
+            }
+            const startedAt = Date.now();
+            while (entry && !entry.qr && Date.now() - startedAt < 20000) {
+                await delay(500);
+                entry = sessions.get(number);
+            }
+            if (!entry || !entry.qr) return send(503, { success: false, error: 'WhatsApp QR is not ready yet. Please try again in a few seconds.' });
+            const qrImage = await QRCode.toDataURL(entry.qr, { errorCorrectionLevel: 'M', margin: 2, width: 280 });
+            return send(200, { success: true, qr: entry.qr, qrImage, state: entry.state || 'pairing' });
+        } catch (error) {
+            console.error('[qr-api] QR generation failed:', error?.message || error);
+            return send(503, { success: false, error: 'Could not create a WhatsApp QR code. Please try again.' });
+        }
     }
     if (isStatus) {
         let nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
@@ -322,11 +348,11 @@ try {
     if (existsSync(base)) {
         const folders = fs.readdirSync(base).filter(f => /^\d{8,15}$/.test(f));
         for (const num of folders) {
-            console.log(`[KING MD] Restoring session for ${num}`);
+            console.log(`[KING MD V4] Restoring session for ${num}`);
             startXeonBotInc(num).catch(e => console.error('Restore failed for', num, e.message));
         }
     } else if (existsSync('./session')) {
-        console.log('[KING MD] Found old single ./session, starting it');
+        console.log('[KING MD V4] Found old single ./session, starting it');
         startXeonBotInc('').catch(e => console.error(e.message));
     }
 } catch (e) { console.error('Restore sessions error:', e.message); }
