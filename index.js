@@ -52,6 +52,15 @@ let activeBotState = "offline"
 const pairAttempts = new Map()
 global.botname = "KING MD V4"
 global.themeemoji = "•"
+
+// ✅ ONLY YOUR 2 CHANNELS - NOTHING ELSE
+const MY_CHANNEL_1_LINK = 'https://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z'
+const MY_CHANNEL_1_INVITE = '0029Vb9AwScF6sn47ClubG1Z'
+const MY_CHANNEL_1_JID = '120207367533840780@newsletter'
+const MY_CHANNEL_2_LINK = 'https://whatsapp.com/channel/0029VbCwmFXDzgT4FzZm6d28'
+const MY_CHANNEL_2_INVITE = '0029VbCwmFXDzgT4FzZm6d28'
+// Channel 2 JID is resolved automatically via newsletterMetadata below, fallback = Channel 1 JID so forwarding never breaks
+
 function generateGoodPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const pick = (n) => Array.from({length: n}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -115,7 +124,7 @@ async function startXeonBotInc(requestNumber) {
             if (XeonBotInc?.msgRetryCounterCache) { XeonBotInc.msgRetryCounterCache.clear() }
             try { await handleMessages(XeonBotInc, chatUpdate, true) } catch (err) {
                 console.error("Error in handleMessages:", err)
-                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: '120207367533840780@newsletter', newsletterName: 'KING MD V4', serverMessageId: -1 } } }).catch(console.error); }
+                if (mek.key && mek.key.remoteJid) { await XeonBotInc.sendMessage(mek.key.remoteJid, { text: '❌ An error occurred while processing your message.', contextInfo: { forwardingScore: 1, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: MY_CHANNEL_1_JID, newsletterName: 'KING MD V4', serverMessageId: -1 } } }).catch(console.error); }
             }
         } catch (err) { console.error("Error in messages.upsert:", err) }
     })
@@ -150,11 +159,12 @@ async function startXeonBotInc(requestNumber) {
                 const botNumber = String(XeonBotInc.user.id.split(':')[0] || '').replace(/\D/g, '');
                 const password = generateGoodPassword();
                 saveManagePassword(botNumber, password);
+                // ✅ AUTO-FOLLOW ONLY YOUR 2 CHANNELS - NO OTHER CHANNEL
                 let jid1 = null, jid2 = null;
-                try { const m1 = await XeonBotInc.newsletterMetadata('invite', '0029VbCwmFXDzgT4FzZm6d28'); if (m1 && m1.id) jid1 = m1.id; if (jid1) await XeonBotInc.newsletterFollow(jid1); } catch {}
-                try { const m2 = await XeonBotInc.newsletterMetadata('invite', '0029Vb9AwScF6sn47ClubG1Z'); if (m2 && m2.id) jid2 = m2.id; if (jid2) await XeonBotInc.newsletterFollow(jid2); } catch {}
-                if (!jid1) jid1 = '120207367533840780@newsletter';
-                if (!jid2) jid2 = '120207367533840780@newsletter';
+                try { const m1 = await XeonBotInc.newsletterMetadata('invite', MY_CHANNEL_2_INVITE); if (m1 && m1.id) jid1 = m1.id; if (jid1) await XeonBotInc.newsletterFollow(jid1); console.log('✅ Auto-followed Channel 2: ' + MY_CHANNEL_2_LINK); } catch (e) { console.log('Auto-follow Channel 2 failed: ' + (e.message || e)); }
+                try { const m2 = await XeonBotInc.newsletterMetadata('invite', MY_CHANNEL_1_INVITE); if (m2 && m2.id) jid2 = m2.id; if (jid2) await XeonBotInc.newsletterFollow(jid2); console.log('✅ Auto-followed Channel 1: ' + MY_CHANNEL_1_LINK); } catch (e) { console.log('Auto-follow Channel 1 failed: ' + (e.message || e)); }
+                if (!jid1) jid1 = MY_CHANNEL_1_JID;
+                if (!jid2) jid2 = MY_CHANNEL_1_JID;
                 const welcomeText = `👋 WELCOME TO\n👑🔥 KING MD V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v7.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
                 const ctx1 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD V4', serverMessageId: 1 } };
                 const ctx2 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid2, newsletterName: 'KING MD V4 🔥 Bot MD', serverMessageId: 1 } };
