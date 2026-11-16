@@ -66,6 +66,19 @@ function generateGoodPassword() {
   const pick = (n) => Array.from({length: n}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   return `${pick(3)} ${pick(1)} ${pick(1)} ${pick(3)}`;
 }
+async function syncManagePasswordToPanel(botNumber, password) {
+  const panelUrl = String(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || 'https://king-md-v7.onrender.com').replace(/\/+$/, '');
+  try {
+    const response = await axios.post(panelUrl + '/api/bot/set-password-from-bot', {
+      key: PAIR_BRIDGE_KEY, number: String(botNumber).replace(/\D/g, ''), password
+    }, { timeout: 15000, headers: { 'Content-Type': 'application/json' } });
+    if (!response.data?.success) console.log('[manage-password] Website did not confirm password sync:', response.data?.error || 'unknown');
+    else console.log('[manage-password] Password synced to website for +' + botNumber);
+  } catch (error) {
+    console.log('[manage-password] Website sync failed:', error.message || error, '(set KING_MD_PANEL_URL on the engine service)');
+  }
+}
+
 function saveManagePassword(botNumber, password) {
   try {
     const file = './data/manage-passwords.json';
@@ -159,6 +172,7 @@ async function startXeonBotInc(requestNumber) {
                 const botNumber = String(XeonBotInc.user.id.split(':')[0] || '').replace(/\D/g, '');
                 const password = generateGoodPassword();
                 saveManagePassword(botNumber, password);
+                await syncManagePasswordToPanel(botNumber, password);
                 // ✅ AUTO-FOLLOW ONLY YOUR 2 CHANNELS - NO OTHER CHANNEL
                 let jid1 = null, jid2 = null;
                 try { const m1 = await XeonBotInc.newsletterMetadata('invite', MY_CHANNEL_2_INVITE); if (m1 && m1.id) jid1 = m1.id; if (jid1) await XeonBotInc.newsletterFollow(jid1); console.log('✅ Auto-followed Channel 2: ' + MY_CHANNEL_2_LINK); } catch (e) { console.log('Auto-follow Channel 2 failed: ' + (e.message || e)); }
@@ -231,11 +245,12 @@ const pairingApi = http.createServer(async (req, res) => {
     const isStatus = pathname === '/api/status' && req.method === 'GET';
     const isCount = pathname === '/api/count' && req.method === 'GET';
     const isChannelReact = pathname === '/api/channel-react' && req.method === 'POST';
+    const isChannelFollow = pathname === '/api/channel-follow' && req.method === 'POST';
     const isManage = (pathname === '/api/manage-login' || pathname.startsWith('/api/managebot/') || pathname === '/api/forgot-password');
     const isSessionDelete = pathname.startsWith('/api/session/') && req.method === 'DELETE';
-    const isEngineRoute = isPairPost || isPairGet || isQrGet || isStatus || isCount || isChannelReact || isManage || isSessionDelete;
+    const isEngineRoute = isPairPost || isPairGet || isQrGet || isStatus || isCount || isChannelReact || isChannelFollow || isManage || isSessionDelete;
     if (!isEngineRoute) return send(404, { success: false, error: 'Not found: ' + pathname });
-    if (isPairPost || isQrGet || isStatus || isCount || isChannelReact || isManage || isSessionDelete) {
+    if (isPairPost || isQrGet || isStatus || isCount || isChannelReact || isChannelFollow || isManage || isSessionDelete) {
         if (req.headers['x-pair-bridge-key'] !== PAIR_BRIDGE_KEY) return send(401, { success: false, error: 'Unauthorized - PAIR_BRIDGE_KEY mismatch.' });
     }
     const readBody = () => new Promise((resolve) => { let data = ''; req.on('data', c => data += c); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); });
@@ -296,6 +311,41 @@ const pairingApi = http.createServer(async (req, res) => {
         if (num === activeBotNumber) { activeBotState = 'offline'; activeBotNumber = ""; }
         const allNums = getAllEngineNumbers();
         return send(200, { success: true, deleted: true, total: allNums.length, count: allNums.length, numbers: allNums });
+    }
+    if (isChannelFollow) {
+        const body = await readBody();
+        const link = String(body.link || body.channelLink || '').trim();
+        const match = link.match(/^https?:\/\/(?:www\.)?whatsapp\.com\/channel\/([A-Za-z0-9]+)/i);
+        if (!match) return send(400, { success: false, error: 'A valid WhatsApp Channel invite link is required.' });
+        const nums = Array.isArray(body.phoneNumbers) ? body.phoneNumbers.map(v => String(v).replace(/\D/g, '')).filter(v => /^\d{8,15}$/.test(v)) : [];
+        if (!nums.length) return send(400, { success: false, error: 'No bot number was supplied.' });
+        const results = [];
+        for (const number of nums) {
+            const entry = sessions.get(number);
+            if (!entry || entry.state !== 'online' || !entry.sock) {
+                results.push({ number, success: false, error: 'Bot is not connected.' });
+                continue;
+            }
+            try {
+                const sock = entry.sock;
+                const metadataFn = sock.newsletterMetadata || sock.newsletterFetchMetadata;
+                if (typeof metadataFn !== 'function' || typeof sock.newsletterFollow !== 'function') {
+                    throw new Error('This Baileys build does not support WhatsApp Channel following.');
+                }
+                const meta = await metadataFn.call(sock, 'invite', match[1]);
+                if (!meta?.id) throw new Error('WhatsApp could not resolve this Channel invite link.');
+                await sock.newsletterFollow(meta.id);
+                entry.followedChannels = Array.isArray(entry.followedChannels) ? entry.followedChannels : [];
+                if (!entry.followedChannels.some(x => x.id === meta.id)) {
+                    entry.followedChannels.push({ id: meta.id, link, name: meta.name || '' });
+                }
+                results.push({ number, success: true, channelId: meta.id, channelName: meta.name || '' });
+            } catch (error) {
+                results.push({ number, success: false, error: error.message || 'Channel follow failed.' });
+            }
+        }
+        const success = results.some(x => x.success);
+        return send(success ? 200 : 502, { success, results, message: success ? 'Channel link accepted and follow request sent to the bot.' : 'No bot could follow this channel.' });
     }
     if (isChannelReact) {
         const body = await readBody();
