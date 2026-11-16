@@ -96,7 +96,25 @@ async function videoCommand(sock, chatId, message) {
     }
 
     const dl = await resolveVideo(videoUrl);
-    const video = await fetchWhatsAppVideo(dl.download);
+    let video;
+    try {
+      video = await fetchWhatsAppVideo(dl.download);
+    } catch (convertError) {
+      console.log('[video] MP4 conversion unavailable; trying direct media download:', convertError.message);
+      const axios = require('axios');
+      const media = await axios.get(dl.download, {
+        responseType: 'arraybuffer', timeout: 180000, maxRedirects: 5,
+        maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'video/mp4,video/*,*/*'
+        }
+      });
+      video = Buffer.from(media.data);
+      const isMp4 = video.length > 1000 && video.slice(4, 8).toString('ascii') === 'ftyp';
+      const isVideo = String(media.headers?.['content-type'] || '').toLowerCase().includes('video/');
+      if (!isMp4 && !isVideo) throw new Error('The provider did not return a valid video file.');
+    }
     const botName = settings.botName || 'KING MD V4';
     const title = dl.title || preview.title || 'Video';
     const fileName = `${title.replace(/[^\w\s-]/g, '').trim() || 'video'}.mp4`;

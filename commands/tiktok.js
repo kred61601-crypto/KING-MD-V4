@@ -1,6 +1,7 @@
 const axios = require('axios');
 const settings = require('../settings');
 const APIs = require('../lib/api');
+const { fetchWhatsAppVideo } = require('../lib/waVideo');
 
 const processedMessages = new Set();
 
@@ -103,9 +104,10 @@ async function resolveTikTok(url) {
 
 async function tiktokCommand(sock, chatId, message) {
   try {
-    if (processedMessages.has(message.key.id)) return;
-    processedMessages.add(message.key.id);
-    setTimeout(() => processedMessages.delete(message.key.id), 5 * 60 * 1000);
+    const messageId = message.key?.id || `${chatId}:${Date.now()}`;
+    if (processedMessages.has(messageId)) return;
+    processedMessages.add(messageId);
+    setTimeout(() => processedMessages.delete(messageId), 5 * 60 * 1000);
 
     const text = message.message?.conversation || message.message?.extendedTextMessage?.text || '';
     const url = extractUrl(text);
@@ -117,23 +119,43 @@ async function tiktokCommand(sock, chatId, message) {
 
     const dl = await resolveTikTok(url);
 
-    // ✅ FIX 403: DO NOT download video to Render. Send URL directly - WhatsApp fetches it.
     if (dl.images?.length && !dl.download) {
-      // Photo mode - send first image + audio link as text, WhatsApp can't slideshow easily
-      // Send images one by one via URL
-      for (let i = 0; i < Math.min(dl.images.length, 5); i++) {
-        await sock.sendMessage(chatId, { image: { url: dl.images[i] }, caption: i === 0 ? captionFor(dl.title) : '' }, { quoted: message });
+      for (let i = 0; i < Math.min(dl.images.length, 10); i++) {
+        await sock.sendMessage(chatId, {
+          image: { url: dl.images[i] },
+          caption: i === 0 ? captionFor(dl.title) : ''
+        }, { quoted: message });
       }
-      if (dl.audio) await sock.sendMessage(chatId, { audio: { url: dl.audio }, mimetype: 'audio/mp4' }, { quoted: message });
+      if (dl.audio) {
+        await sock.sendMessage(chatId, { audio: { url: dl.audio }, mimetype: 'audio/mpeg' }, { quoted: message });
+      }
     } else if (dl.download) {
-      // Try HD first, then normal - BOTH as URL, no download on server
+      let videoBuffer;
       try {
-        await sock.sendMessage(chatId, { video: { url: dl.download_hd || dl.download }, mimetype: 'video/mp4', caption: captionFor(dl.title) }, { quoted: message });
-      } catch (e) {
-        console.log('[tiktok] URL send failed, trying other URL:', e.message);
-        await sock.sendMessage(chatId, { video: { url: dl.download }, mimetype: 'video/mp4', caption: captionFor(dl.title) }, { quoted: message });
+        videoBuffer = await fetchWhatsAppVideo(dl.download);
+      } catch (convertError) {
+        console.log('[tiktok] MP4 conversion unavailable; trying direct media download:', convertError.message);
+        const media = await axios.get(dl.download, {
+          responseType: 'arraybuffer', timeout: 120000, maxRedirects: 5,
+          maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'video/mp4,video/*,*/*'
+          }
+        });
+        videoBuffer = Buffer.from(media.data);
+        const isMp4 = videoBuffer.length > 1000 && videoBuffer.slice(4, 8).toString('ascii') === 'ftyp';
+        const isVideo = String(media.headers?.['content-type'] || '').toLowerCase().includes('video/');
+        if (!isMp4 && !isVideo) throw new Error('The TikTok provider did not return a valid video file.');
       }
-    } else throw new Error('Invalid download response');
+      await sock.sendMessage(chatId, {
+        video: videoBuffer,
+        mimetype: 'video/mp4',
+        caption: captionFor(dl.title)
+      }, { quoted: message });
+    } else {
+      throw new Error('The TikTok provider returned no usable media.');
+    }
 
     await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
   } catch (err) {
