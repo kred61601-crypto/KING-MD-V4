@@ -143,6 +143,7 @@ const { anticallCommand, readState: readAnticallState } = require('./commands/an
 const { pmblockerCommand, readState: readPmBlockerState } = require('./commands/pmblocker');
 const settingsCommand = require('./commands/settings');
 const soraCommand = require('./commands/sora');
+const { channelCommand } = require('./commands/channel');
 
 global.packname = settings.packname;
 global.author = settings.author;
@@ -437,6 +438,11 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.removebg') || userMessage.startsWith('.rmbg') || userMessage.startsWith('.nobg'): await removebgCommand.exec(sock, message, userMessage.split(' ').slice(1)); break;
             case userMessage.startsWith('.remini') || userMessage.startsWith('.enhance') || userMessage.startsWith('.upscale'): await reminiCommand(sock, chatId, message, userMessage.split(' ').slice(1)); break;
             case userMessage.startsWith('.sora'): await soraCommand(sock, chatId, message); break;
+            // ✅ .channel = Post to STATUS - reply in DM / Self DM
+            case userMessage === '.channel' || userMessage.startsWith('.channel ') || userMessage === '.status' || userMessage.startsWith('.status ') || userMessage === '.poststatus' || userMessage.startsWith('.poststatus '):
+                await channelCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
             // ✅ .view KEPT - for in case, not required
             case userMessage === '.view': await sock.sendMessage(chatId, { text: '📢 *KING MD V4 Channels 👑*\n\n1️⃣ Channel 1:\nhttps://whatsapp.com/channel/0029Vb9AwScF6sn47ClubG1Z\n\n2️⃣ Channel 2:\nhttps://whatsapp.com/channel/0029VbCwmFXDzgT4FzZm6d28', ...channelInfo }, { quoted: message }); break;
             default: if (isGroup) { if (userMessage) { await handleChatbotResponse(sock, chatId, message, userMessage, senderId); } await handleTagDetection(sock, chatId, message, senderId); await handleMentionDetection(sock, chatId, message); } commandExecuted = false; break;
