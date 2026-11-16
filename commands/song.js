@@ -118,7 +118,7 @@ async function songCommand(sock, chatId, message) {
 
     // Knight first; rest are fallbacks (same sources as mini)
     const apiMethods = [
-      { name: 'Knight API', method: () => knightSongDownload(video.url) },
+      { name: 'KING MD V4 API', method: () => knightSongDownload(video.url) },
       { name: 'Hector', method: () => hectorSongDownload(video.url) },
       { name: 'Prince API', method: () => princeSongDownload(video.url) },
       { name: 'Prexzy', method: () => prexzySongDownload(video.url) },

@@ -97,7 +97,7 @@ async function videoCommand(sock, chatId, message) {
 
     const dl = await resolveVideo(videoUrl);
     const video = await fetchWhatsAppVideo(dl.download);
-    const botName = settings.botName || 'Knight Bot';
+    const botName = settings.botName || 'KING MD V4';
     const title = dl.title || preview.title || 'Video';
     const fileName = `${title.replace(/[^\w\s-]/g, '').trim() || 'video'}.mp4`;
 

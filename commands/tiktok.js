@@ -29,7 +29,7 @@ function tikTokUrlVariants(url) {
 }
 
 function captionFor(title) {
-  const bot = (settings.botName || 'Knight Bot').toUpperCase();
+  const bot = (settings.botName || 'KING MD V4').toUpperCase();
   return title ? `*DOWNLOADED BY ${bot}*\n\n📝 ${title}` : `*DOWNLOADED BY ${bot}*`;
 }
 

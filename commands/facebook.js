@@ -54,7 +54,7 @@ async function resolveFacebook(url) {
 }
 
 async function sendVideo(sock, chatId, message, videoUrl, title) {
-  const bot = (settings.botName || 'Knight Bot').toUpperCase();
+  const bot = (settings.botName || 'KING MD V4').toUpperCase();
   const caption = title ? `*DOWNLOADED BY ${bot}*\n\n📝 ${title}` : `*DOWNLOADED BY ${bot}*`;
 
   try {

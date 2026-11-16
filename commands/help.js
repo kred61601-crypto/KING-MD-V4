@@ -5,7 +5,7 @@ const path = require('path');
 async function helpCommand(sock, chatId, message) {
     const helpMessage = `
 ╔═══════════════════╗
-   *🤖 ${settings.botName || '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥'}*  
+   *🤖 ${settings.botName || 'KING MD V4'}*  
    Version: *${settings.version || '3.0.0'}*
    by ${settings.botOwner || '𝗞𝗜𝗡𝗚 𝗠𝗗 Hacker'}
    YT : ${global.ytch}
@@ -244,7 +244,7 @@ Join our channel for updates:`;
                     isForwarded: true,
                     forwardedNewsletterMessageInfo: {
                         newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥',
+                        newsletterName: 'KING MD V4',
                         serverMessageId: -1
                     }
                 }
@@ -258,7 +258,7 @@ Join our channel for updates:`;
                     isForwarded: true,
                     forwardedNewsletterMessageInfo: {
                         newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: '𝗞𝗜𝗡𝗚 𝗠𝗗 ❤️‍🔥',
+                        newsletterName: 'KING MD V4',
                         serverMessageId: -1
                     } 
                 }
