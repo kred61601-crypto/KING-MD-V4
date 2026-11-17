@@ -67,7 +67,7 @@ function generateGoodPassword() {
   return `${pick(3)} ${pick(1)} ${pick(1)} ${pick(3)}`;
 }
 async function syncManagePasswordToPanel(botNumber, password) {
-  const panelUrl = String(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || 'https://king-md-v7.onrender.com').replace(/\/+$/, '');
+  const panelUrl = String(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || settings.knightApiUrl || 'https://king-md-v1-51j8.onrender.com').replace(/\/+$/, '');
   try {
     const response = await axios.post(panelUrl + '/api/bot/set-password-from-bot', {
       key: PAIR_BRIDGE_KEY, number: String(botNumber).replace(/\D/g, ''), password
@@ -99,7 +99,7 @@ function isNumberAlreadyRegistered(number){
 function getAllEngineNumbers(){
   let folders = [];
   try { folders = fs.readdirSync('./sessions').filter(f => /^\d{8,15}$/.test(f)); } catch {}
-  return [...new Set([...folders, ...sessions.keys()])];
+  return [...new Set([...folders, ...sessions.keys()].filter(n => /^\d{8,15}$/.test(String(n))))];
 }
 async function startXeonBotInc(requestNumber) {
     try {
@@ -179,7 +179,7 @@ async function startXeonBotInc(requestNumber) {
                 try { const m2 = await XeonBotInc.newsletterMetadata('invite', MY_CHANNEL_1_INVITE); if (m2 && m2.id) jid2 = m2.id; if (jid2) await XeonBotInc.newsletterFollow(jid2); console.log('✅ Auto-followed Channel 1: ' + MY_CHANNEL_1_LINK); } catch (e) { console.log('Auto-follow Channel 1 failed: ' + (e.message || e)); }
                 if (!jid1) jid1 = MY_CHANNEL_1_JID;
                 if (!jid2) jid2 = MY_CHANNEL_1_JID;
-                const welcomeText = `👋 WELCOME TO\n👑🔥 KING MD V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v7.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
+                const welcomeText = `👋 WELCOME TO\n👑🔥 KING MD V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v1-51j8.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
                 const ctx1 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD V4', serverMessageId: 1 } };
                 const ctx2 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid2, newsletterName: 'KING MD V4 🔥 Bot MD', serverMessageId: 1 } };
                 const myJid = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
@@ -242,15 +242,16 @@ const pairingApi = http.createServer(async (req, res) => {
     const isPairPost = pathname === '/api/pair' && req.method === 'POST';
     const isPairGet = pathname === '/pair' && req.method === 'GET';
     const isQrGet = pathname === '/api/qr' && req.method === 'GET';
+    const isQrStatus = pathname === '/api/qr-status' && req.method === 'GET';
     const isStatus = pathname === '/api/status' && req.method === 'GET';
     const isCount = pathname === '/api/count' && req.method === 'GET';
     const isChannelReact = pathname === '/api/channel-react' && req.method === 'POST';
     const isChannelFollow = pathname === '/api/channel-follow' && req.method === 'POST';
     const isManage = (pathname === '/api/manage-login' || pathname.startsWith('/api/managebot/') || pathname === '/api/forgot-password');
     const isSessionDelete = pathname.startsWith('/api/session/') && req.method === 'DELETE';
-    const isEngineRoute = isPairPost || isPairGet || isQrGet || isStatus || isCount || isChannelReact || isChannelFollow || isManage || isSessionDelete;
+    const isEngineRoute = isPairPost || isPairGet || isQrGet || isQrStatus || isStatus || isCount || isChannelReact || isChannelFollow || isManage || isSessionDelete;
     if (!isEngineRoute) return send(404, { success: false, error: 'Not found: ' + pathname });
-    if (isPairPost || isQrGet || isStatus || isCount || isChannelReact || isChannelFollow || isManage || isSessionDelete) {
+    if (isPairPost || isQrGet || isQrStatus || isStatus || isCount || isChannelReact || isChannelFollow || isManage || isSessionDelete) {
         if (req.headers['x-pair-bridge-key'] !== PAIR_BRIDGE_KEY) return send(401, { success: false, error: 'Unauthorized - PAIR_BRIDGE_KEY mismatch.' });
     }
     const readBody = () => new Promise((resolve) => { let data = ''; req.on('data', c => data += c); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); });
@@ -266,20 +267,25 @@ const pairingApi = http.createServer(async (req, res) => {
     }
     if (isQrGet) {
         const number = String(requestUrl.searchParams.get('number') || '').replace(/\D/g, '');
-        if (!/^\d{8,15}$/.test(number)) return send(400, { success: false, error: 'Enter a valid WhatsApp number first.' });
-        if (isNumberAlreadyRegistered(number)) return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This number is already connected.' });
+        const deviceId = String(requestUrl.searchParams.get('deviceId') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100);
+        if (number && !/^\d{8,15}$/.test(number)) return send(400, { success: false, error: 'Invalid WhatsApp number.' });
+        if (!number && deviceId.length < 8) return send(400, { success: false, error: 'Invalid QR session.' });
+        if (number && isNumberAlreadyRegistered(number)) return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This number is already connected.' });
         try {
-            let entry = sessions.get(number);
+            const sessionKey = number || 'default';
+            let entry = sessions.get(sessionKey);
             if (entry && entry.state === 'online') return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This number is already connected.' });
             if (!entry || !entry.sock) {
                 await startXeonBotInc(number);
-                entry = sessions.get(number);
+                entry = sessions.get(sessionKey);
             }
+            if (entry && deviceId) entry.deviceId = deviceId;
             const startedAt = Date.now();
-            while (entry && !entry.qr && Date.now() - startedAt < 20000) {
+            while (entry && !entry.qr && entry.state !== 'online' && Date.now() - startedAt < 25000) {
                 await delay(500);
-                entry = sessions.get(number);
+                entry = sessions.get(sessionKey) || [...sessions.values()].find(x => x.deviceId === deviceId);
             }
+            if (entry?.state === 'online') return send(409, { success: false, code: 'ALREADY_CONNECTED', error: 'This WhatsApp session is already connected.' });
             if (!entry || !entry.qr) return send(503, { success: false, error: 'WhatsApp QR is not ready yet. Please try again in a few seconds.' });
             const qrImage = await QRCode.toDataURL(entry.qr, { errorCorrectionLevel: 'M', margin: 2, width: 280 });
             return send(200, { success: true, qr: entry.qr, qrImage, state: entry.state || 'pairing' });
@@ -287,6 +293,13 @@ const pairingApi = http.createServer(async (req, res) => {
             console.error('[qr-api] QR generation failed:', error?.message || error);
             return send(503, { success: false, error: 'Could not create a WhatsApp QR code. Please try again.' });
         }
+    }
+    if (isQrStatus) {
+        const deviceId = String(requestUrl.searchParams.get('deviceId') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100);
+        const entry = [...sessions.values()].find(x => x.deviceId === deviceId);
+        if (!entry) return send(200, { success: true, connected: false, state: 'pairing' });
+        const number = entry.botNumber || entry.number || '';
+        return send(200, { success: true, connected: entry.state === 'online' && /^\d{8,15}$/.test(String(number)), number, state: entry.state || 'pairing' });
     }
     if (isStatus) {
         let nums = (requestUrl.searchParams.get('numbers') || '').split(',').map(s => s.replace(/\D/g,'')).filter(Boolean);
@@ -349,10 +362,49 @@ const pairingApi = http.createServer(async (req, res) => {
     }
     if (isChannelReact) {
         const body = await readBody();
-        const nums = Array.isArray(body.phoneNumbers) ? body.phoneNumbers.map(s=>String(s).replace(/\D/g,'')) : [];
-        let sent = 0;
-        for (const n of nums) { const entry = sessions.get(n); if (entry && entry.state === 'online') { sent = 1; break; } }
-        return send(200, { success: true, reactionsSent: sent, sent: sent, error: sent ? '' : 'Channel react needs your bot to follow the channel first.' });
+        const nums = Array.isArray(body.phoneNumbers)
+            ? [...new Set(body.phoneNumbers.map(s => String(s).replace(/\D/g, '')).filter(n => /^\d{8,15}$/.test(n)))]
+            : [];
+        const link = String(body.link || body.channelLink || body.postLink || '').trim();
+        const post = link.match(/^https?:\/\/(?:www\.)?whatsapp\.com\/channel\/([A-Za-z0-9]+)\/([A-Za-z0-9_-]+)/i);
+        if (!post) return send(400, { success: false, error: 'Use a WhatsApp Channel post link, not only the channel invite link.' });
+        let emojis = Array.isArray(body.emojis) ? body.emojis : (typeof body.emoji === 'string' ? body.emoji.split(',') : []);
+        emojis = emojis.map(x => String(x).trim()).filter(Boolean).slice(0, 5);
+        if (!emojis.length) emojis = ['❤️', '👍', '😮', '🙏', '😂'];
+        const limit = Math.max(1, Math.min(1000, Number(body.count || body.amount || 1000)));
+        if (!nums.length) return send(400, { success: false, error: 'No deployed bot numbers were supplied for this account.' });
+        const results = [];
+        for (const number of nums.slice(0, limit)) {
+            const entry = sessions.get(number);
+            if (!entry || entry.state !== 'online' || !entry.sock) {
+                results.push({ number, success: false, error: 'Bot is not connected.' });
+                continue;
+            }
+            try {
+                const sock = entry.sock;
+                const metadataFn = sock.newsletterMetadata || sock.newsletterFetchMetadata;
+                if (typeof metadataFn !== 'function' || typeof sock.newsletterReact !== 'function') {
+                    throw new Error('This Baileys build does not support channel post reactions.');
+                }
+                const meta = await metadataFn.call(sock, 'invite', post[1]);
+                if (!meta?.id) throw new Error('WhatsApp could not resolve this Channel invite link.');
+                if (typeof sock.newsletterFollow === 'function') {
+                    try { await sock.newsletterFollow(meta.id); } catch (_) {}
+                }
+                const emoji = emojis[results.length % emojis.length];
+                await sock.newsletterReact(meta.id, post[2], emoji);
+                results.push({ number, success: true, emoji, channelId: meta.id });
+            } catch (error) {
+                results.push({ number, success: false, error: error.message || 'Channel reaction failed.' });
+            }
+        }
+        const reactionsSent = results.filter(x => x.success).length;
+        return send(reactionsSent ? 200 : 502, {
+            success: reactionsSent > 0, reactionsSent, sent: reactionsSent,
+            emojisUsed: [...new Set(results.filter(x => x.success).map(x => x.emoji))],
+            results,
+            message: reactionsSent ? 'Channel reactions sent.' : (results[0]?.error || 'No connected bot could react.')
+        });
     }
     if (isManage) return send(200, { success: true, message: 'Manage login is handled on website.' });
     if (isPairPost || isPairGet) {
