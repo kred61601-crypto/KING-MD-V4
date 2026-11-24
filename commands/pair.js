@@ -1,134 +1,20 @@
 const axios = require('axios');
 const { sleep } = require('../lib/myfunc');
-
 async function pairCommand(sock, chatId, message, q) {
-    try {
-        if (!q) {
-            return await sock.sendMessage(chatId, {
-                text: "Please provide valid WhatsApp number\nExample: .pair 254XXXXXXXXXX",
-                contextInfo: {
-                    forwardingScore: 1,
-                    isForwarded: true,
-                    forwardedNewsletterMessageInfo: {
-                        newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: 'KING MD V4',
-                        serverMessageId: -1
-                    }
-                }
-            });
-        }
-
-        const numbers = q.split(',')
-            .map((v) => v.replace(/[^0-9]/g, ''))
-            .filter((v) => v.length > 5 && v.length < 20);
-
-        if (numbers.length === 0) {
-            return await sock.sendMessage(chatId, {
-                text: "Invalid number❌️ Please use the correct format!",
-                contextInfo: {
-                    forwardingScore: 1,
-                    isForwarded: true,
-                    forwardedNewsletterMessageInfo: {
-                        newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: 'KING MD V4',
-                        serverMessageId: -1
-                    }
-                }
-            });
-        }
-
-        for (const number of numbers) {
-            const whatsappID = number + '@s.whatsapp.net';
-            const result = await sock.onWhatsApp(whatsappID);
-
-            if (!result[0]?.exists) {
-                return await sock.sendMessage(chatId, {
-                    text: `That number is not registered on WhatsApp❗️`,
-                    contextInfo: {
-                        forwardingScore: 1,
-                        isForwarded: true,
-                        forwardedNewsletterMessageInfo: {
-                            newsletterJid: '120363161513685998@newsletter',
-                            newsletterName: 'KING MD V4 MD',
-                            serverMessageId: -1
-                        }
-                    }
-                });
-            }
-
-            await sock.sendMessage(chatId, {
-                text: "Wait a moment for the code",
-                contextInfo: {
-                    forwardingScore: 1,
-                    isForwarded: true,
-                    forwardedNewsletterMessageInfo: {
-                        newsletterJid: '120363161513685998@newsletter',
-                        newsletterName: 'KING MD V4 MD',
-                        serverMessageId: -1
-                    }
-                }
-            });
-
-            try {
-                const response = await axios.get(`https://knight-bot-paircode.onrender.com/code?number=${number}`);
-                
-                if (response.data && response.data.code) {
-                    const code = response.data.code;
-                    if (code === "Service Unavailable") {
-                        throw new Error('Service Unavailable');
-                    }
-                    
-                    await sleep(5000);
-                    await sock.sendMessage(chatId, {
-                        text: `Your pairing code: ${code}`,
-                        contextInfo: {
-                            forwardingScore: 1,
-                            isForwarded: true,
-                            forwardedNewsletterMessageInfo: {
-                                newsletterJid: '120363161513685998@newsletter',
-                                newsletterName: 'KING MD V4 MD',
-                                serverMessageId: -1
-                            }
-                        }
-                    });
-                } else {
-                    throw new Error('Invalid response from server');
-                }
-            } catch (apiError) {
-                console.error('API Error:', apiError);
-                const errorMessage = apiError.message === 'Service Unavailable' 
-                    ? "Service is currently unavailable. Please try again later."
-                    : "Failed to generate pairing code. Please try again later.";
-                
-                await sock.sendMessage(chatId, {
-                    text: errorMessage,
-                    contextInfo: {
-                        forwardingScore: 1,
-                        isForwarded: true,
-                        forwardedNewsletterMessageInfo: {
-                            newsletterJid: '120363161513685998@newsletter',
-                            newsletterName: 'KING MD V4',
-                            serverMessageId: -1
-                        }
-                    }
-                });
-            }
-        }
-    } catch (error) {
-        console.error(error);
-        await sock.sendMessage(chatId, {
-            text: "An error occurred. Please try again later.",
-            contextInfo: {
-                forwardingScore: 1,
-                isForwarded: true,
-                forwardedNewsletterMessageInfo: {
-                    newsletterJid: '120363161513685998@newsletter',
-                    newsletterName: 'KING MD V4',
-                    serverMessageId: -1
-                }
-            }
-        });
-    }
+  const number = String(q || '').replace(/[^0-9]/g, '');
+  if (number.length < 8 || number.length > 15) return sock.sendMessage(chatId, { text: 'Use .pair followed by the international WhatsApp number, including country code. Example: .pair 2547XXXXXXXX' }, { quoted: message });
+  try {
+    await sock.sendMessage(chatId, { text: '⏳ Requesting a pairing code from this KING MD engine...' }, { quoted: message });
+    const port = Number(process.env.PAIR_API_PORT || process.env.PORT || 8000);
+    const base = String(process.env.KING_MD_ENGINE_LOCAL_URL || `http://127.0.0.1:${port}`).replace(/\/+$/, '');
+    const response = await axios.get(`${base}/pair`, { params: { number }, timeout: 45000 });
+    const code = response.data?.pairingCode || response.data?.code;
+    if (!response.data?.success || !code) throw new Error(response.data?.error || 'Pairing code was not returned');
+    await sleep(1000);
+    await sock.sendMessage(chatId, { text: `🔐 Your WhatsApp pairing code: *${code}*\n\nEnter this code on the phone you are connecting.` }, { quoted: message });
+  } catch (error) {
+    const detail = error.response?.data?.error || error.message || 'Unknown error';
+    await sock.sendMessage(chatId, { text: `❌ Pairing request failed: ${detail}\n\nUse the KING MD app pairing page if this bot is already connected.` }, { quoted: message });
+  }
 }
-
-module.exports = pairCommand; 
+module.exports = pairCommand;
