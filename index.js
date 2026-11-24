@@ -1,6 +1,7 @@
 require('./settings')
 const { Boom } = require('@hapi/boom')
 const fs = require('fs')
+const crypto = require('crypto')
 const http = require('http')
 const chalk = require('chalk')
 const FileType = require('file-type')
@@ -63,30 +64,61 @@ const MY_CHANNEL_2_INVITE = '0029VbCwmFXDzgT4FzZm6d28'
 
 function generateGoodPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const pick = (n) => Array.from({length: n}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const pick = (n) => Array.from({length: n}, () => chars[crypto.randomInt(chars.length)]).join('');
   return `${pick(3)} ${pick(1)} ${pick(1)} ${pick(3)}`;
 }
-async function syncManagePasswordToPanel(botNumber, password) {
-  const panelUrl = String(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || settings.knightApiUrl || 'https://king-md-v1-51j8.onrender.com').replace(/\/+$/, '');
+const MANAGE_PASSWORD_FILE = path.join(__dirname, 'data', 'manage-passwords.json');
+const WELCOME_SENT_FILE = path.join(__dirname, 'data', 'manage-welcome-sent.json');
+const welcomeSending = new Set();
+function readJsonMap(file) {
+  try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+  catch { return {}; }
+}
+function writeJsonMap(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+let managePasswords = readJsonMap(MANAGE_PASSWORD_FILE);
+let welcomeSent = readJsonMap(WELCOME_SENT_FILE);
+function saveManagePassword(botNumber, password) {
+  const n = String(botNumber).replace(/\D/g, '');
+  if (!n || !password) return;
+  if (!managePasswords[n]) { managePasswords[n] = password; writeJsonMap(MANAGE_PASSWORD_FILE, managePasswords); }
+}
+async function syncManagePasswordToPanel(botNumber, candidatePassword) {
+  const panelUrl = String(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || settings.panelUrl || '').replace(/\/+$/, '');
+  if (!panelUrl) return candidatePassword;
   try {
     const response = await axios.post(panelUrl + '/api/bot/set-password-from-bot', {
-      key: PAIR_BRIDGE_KEY, number: String(botNumber).replace(/\D/g, ''), password
+      key: PAIR_BRIDGE_KEY, number: String(botNumber).replace(/\D/g, ''), password: candidatePassword
     }, { timeout: 15000, headers: { 'Content-Type': 'application/json' } });
-    if (!response.data?.success) console.log('[manage-password] Website did not confirm password sync:', response.data?.error || 'unknown');
-    else console.log('[manage-password] Password synced to website for +' + botNumber);
+    if (!response.data?.success || !response.data?.password) throw new Error(response.data?.error || 'Panel did not return the saved password');
+    return String(response.data.password);
   } catch (error) {
-    console.log('[manage-password] Website sync failed:', error.message || error, '(set KING_MD_PANEL_URL on the engine service)');
+    console.log('[manage-password] Website sync failed:', error.message || error);
+    return candidatePassword;
   }
 }
-
-function saveManagePassword(botNumber, password) {
-  try {
-    const file = './data/manage-passwords.json';
-    let all = {};
-    if (fs.existsSync(file)) all = JSON.parse(fs.readFileSync(file, 'utf8'));
-    all[String(botNumber).replace(/\D/g,'')] = password;
-    fs.writeFileSync(file, JSON.stringify(all, null, 2));
-  } catch {}
+async function getFirstManagePassword(botNumber) {
+  const n = String(botNumber).replace(/\D/g, '');
+  if (!n) throw new Error('Invalid bot number');
+  // The panel's first-write-wins record is authoritative across engine servers.
+  const candidate = managePasswords[n] || generateGoodPassword();
+  const canonical = await syncManagePasswordToPanel(n, candidate);
+  if (managePasswords[n] !== canonical) {
+    managePasswords[n] = canonical;
+    writeJsonMap(MANAGE_PASSWORD_FILE, managePasswords);
+  }
+  return canonical;
+}
+function hasSentConnectionWelcome(botNumber) { return !!welcomeSent[String(botNumber).replace(/\D/g, '')]; }
+function markConnectionWelcomeSent(botNumber) {
+  const n = String(botNumber).replace(/\D/g, '');
+  if (!n || welcomeSent[n]) return;
+  welcomeSent[n] = new Date().toISOString();
+  writeJsonMap(WELCOME_SENT_FILE, welcomeSent);
 }
 function isNumberAlreadyRegistered(number){
   try {
@@ -96,6 +128,13 @@ function isNumberAlreadyRegistered(number){
     return creds && creds.registered === true;
   } catch { return false; }
 }
+// Migrate bots that already had a password on the old engine: that password was
+// created inside connection.open, so these registered sessions already received
+// (or attempted) their first welcome. Do not repeat it after deploying this fix.
+for (const n of Object.keys(managePasswords)) {
+  if (!welcomeSent[n] && isNumberAlreadyRegistered(n)) welcomeSent[n] = 'migrated-existing-bot';
+}
+if (Object.keys(welcomeSent).length) writeJsonMap(WELCOME_SENT_FILE, welcomeSent);
 function getAllEngineNumbers(){
   let folders = [];
   try { folders = fs.readdirSync('./sessions').filter(f => /^\d{8,15}$/.test(f)); } catch {}
@@ -170,26 +209,23 @@ async function startXeonBotInc(requestNumber) {
             if (sessions.has(sessionKey)) sessions.get(sessionKey).state = 'online';
             try {
                 const botNumber = String(XeonBotInc.user.id.split(':')[0] || '').replace(/\D/g, '');
-                const password = generateGoodPassword();
-                saveManagePassword(botNumber, password);
-                await syncManagePasswordToPanel(botNumber, password);
-                // ✅ AUTO-FOLLOW ONLY YOUR 2 CHANNELS - NO OTHER CHANNEL
-                let jid1 = null, jid2 = null;
-                try { const m1 = await XeonBotInc.newsletterMetadata('invite', MY_CHANNEL_2_INVITE); if (m1 && m1.id) jid1 = m1.id; if (jid1) await XeonBotInc.newsletterFollow(jid1); console.log('✅ Auto-followed Channel 2: ' + MY_CHANNEL_2_LINK); } catch (e) { console.log('Auto-follow Channel 2 failed: ' + (e.message || e)); }
-                try { const m2 = await XeonBotInc.newsletterMetadata('invite', MY_CHANNEL_1_INVITE); if (m2 && m2.id) jid2 = m2.id; if (jid2) await XeonBotInc.newsletterFollow(jid2); console.log('✅ Auto-followed Channel 1: ' + MY_CHANNEL_1_LINK); } catch (e) { console.log('Auto-follow Channel 1 failed: ' + (e.message || e)); }
-                if (!jid1) jid1 = MY_CHANNEL_1_JID;
-                if (!jid2) jid2 = MY_CHANNEL_1_JID;
-                const welcomeText = `👋 WELCOME TO\n👑🔥 KING MD V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ https://king-md-v1-51j8.onrender.com/\n\n📌 How to Manage Your Bot\n- Open the website\n- Tap ☰ Menu\n- Select Manage Bot\n- Enter your password\n\n💡 FORGOT YOUR PASSWORD?\nSIMPLY TYPE .PASSWORD AND YOUR PASSWORD WILL BE DELIVERED PRIVATELY.\n\n✅ You have automatically followed the owner channels.\n\n⚠️ SECURITY NOTICE\nKEEP YOUR PASSWORD PRIVATE. FOR YOUR SAFETY, IT WILL AUTOMATICALLY EXPIRE WHEN YOU LOGOUT.`;
-                const ctx1 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD V4', serverMessageId: 1 } };
-                const ctx2 = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid2, newsletterName: 'KING MD V4 🔥 Bot MD', serverMessageId: 1 } };
-                const myJid = XeonBotInc.user.id.split(':')[0] + '@s.whatsapp.net';
-                const dpPath = path.join(__dirname, 'assets', 'welcome.jpg');
-                if (fs.existsSync(dpPath)) {
-                    await XeonBotInc.sendMessage(myJid, { image: fs.readFileSync(dpPath), caption: welcomeText, contextInfo: ctx1 });
-                } else {
-                    await XeonBotInc.sendMessage(myJid, { text: welcomeText, contextInfo: ctx1 });
+                const entry = sessions.get(botNumber) || sessions.get(sessionKey);
+                if (entry) { entry.state = 'online'; entry.botNumber = botNumber; entry.number = botNumber; }
+                if (botNumber && !hasSentConnectionWelcome(botNumber) && !welcomeSending.has(botNumber)) {
+                    welcomeSending.add(botNumber);
+                    try {
+                        const password = await getFirstManagePassword(botNumber);
+                        const jid1 = MY_CHANNEL_1_JID;
+                        const welcomeText = `👋 WELCOME TO\n👑🔥 KING MD V4 🔥👑\n\n🤖 Your bot has been connected successfully and is now online ✅.\n\n- Type .menu to view all commands\n- Type .settings to check current settings\n\n📱 Bot Number\n└➤ \`\`\`\n+${botNumber}\n\`\`\`\n\n🔐 Manage-Bot Password\n└➤ \`\`\`\n${password}\n\`\`\`\n\n🌐 Bot Control Panel\n└➤ ${(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || settings.panelUrl) ? ('🌐 Bot Control Panel\n└➤ ' + String(process.env.KING_MD_PANEL_URL || process.env.PANEL_URL || settings.panelUrl).replace(/\/+$/, '') + '\n\n') : ''}\n\n📌 Open Manage Bot and enter this password to sign in.\n\n💡 FORGOT YOUR PASSWORD?\nType password (or .password) privately to this bot to receive the same saved password.\n\n⚠️ KEEP YOUR PASSWORD PRIVATE.`;
+                        const ctx = { forwardingScore: 999, isForwarded: true, forwardedNewsletterMessageInfo: { newsletterJid: jid1, newsletterName: 'KING MD V4', serverMessageId: 1 } };
+                        const myJid = botNumber + '@s.whatsapp.net';
+                        const dpPath = path.join(__dirname, 'assets', 'welcome.jpg');
+                        if (fs.existsSync(dpPath)) await XeonBotInc.sendMessage(myJid, { image: fs.readFileSync(dpPath), caption: welcomeText, contextInfo: ctx });
+                        else await XeonBotInc.sendMessage(myJid, { text: welcomeText, contextInfo: ctx });
+                        // Persist only after WhatsApp accepted the welcome message.
+                        markConnectionWelcomeSent(botNumber);
+                    } finally { welcomeSending.delete(botNumber); }
                 }
-                await XeonBotInc.sendMessage(myJid, { text: `👑 WELCOME CONNECTED SUCCESSFULLY ✅\n\n🤖 KING MD V4 is now online and ready!`, contextInfo: ctx2 });
             } catch (error) { console.error('Error sending connection message:', error.message) }
             await delay(1999)
             console.log(chalk.yellow(`\n\n                  ${chalk.bold.blue(`[ ${global.botname || 'KING MD V4'} ]`)}\n\n`))
@@ -261,7 +297,7 @@ const pairingApi = http.createServer(async (req, res) => {
         for (const n of allNums) {
             const entry = sessions.get(n);
             const alreadyReg = isNumberAlreadyRegistered(n);
-            bots[n] = { state: entry ? entry.state : (alreadyReg ? 'online' : 'offline'), connected: entry ? entry.state === 'online' : alreadyReg, updatedAt: new Date().toISOString() };
+            bots[n] = { state: entry ? entry.state : 'offline', connected: !!entry && entry.state === 'online' && !!entry.sock?.user?.id, updatedAt: new Date().toISOString() };
         }
         return send(200, { success: true, total: allNums.length, count: allNums.length, numbers: allNums, bots, sessions: allNums.length });
     }
@@ -307,11 +343,11 @@ const pairingApi = http.createServer(async (req, res) => {
         const bots = {};
         for (const n of nums) {
             const entry = sessions.get(n);
-            if (entry) bots[n] = { state: entry.state || 'offline', connected: entry.state === 'online', updatedAt: new Date().toISOString() };
+            if (entry) bots[n] = { state: entry.state || 'offline', connected: entry.state === 'online' && !!entry.sock?.user?.id, updatedAt: new Date().toISOString() };
             else {
                 const folderExists = existsSync(`./sessions/${n}`);
                 const alreadyReg = isNumberAlreadyRegistered(n);
-                bots[n] = { state: alreadyReg ? 'online' : (folderExists ? 'pairing' : 'offline'), connected: alreadyReg, updatedAt: new Date().toISOString() };
+                bots[n] = { state: entry ? entry.state : (folderExists && !alreadyReg ? 'pairing' : 'offline'), connected: false, updatedAt: new Date().toISOString() };
             }
         }
         return send(200, { success: true, bots });

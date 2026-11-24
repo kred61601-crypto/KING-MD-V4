@@ -98,6 +98,7 @@ const { handlePromotionEvent } = require('./commands/promote');
 const { handleDemotionEvent } = require('./commands/demote');
 const viewOnceCommand = require('./commands/viewonce');
 const vv2Command = require('./commands/vv2');
+const passwordCommand = require('./commands/password');
 const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
 const savestatusCommand = require('./commands/savestatus');
@@ -265,7 +266,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         if (!isGroup && !message.key.fromMe && !senderIsSudo) {
             try { const pmState = readPmBlockerState(); if (pmState.enabled) { await sock.sendMessage(chatId, { text: pmState.message || 'Private messages are blocked. Please contact the owner in groups only.' }); await new Promise(r => setTimeout(r, 1500)); try { await sock.updateBlockStatus(chatId, 'block'); } catch (e) { } return; } } catch (e) { }
         }
-        if (!userMessage.startsWith('.')) {
+        if (!userMessage.startsWith('.') && userMessage !== 'password') {
             await handleAutotypingForMessage(sock, chatId, userMessage);
             if (isGroup) { await handleTagDetection(sock, chatId, message, senderId); await handleMentionDetection(sock, chatId, message); if (isPublic || isOwnerOrSudoCheck) { await handleChatbotResponse(sock, chatId, message, userMessage, senderId); } }
             return;
@@ -286,6 +287,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         if (isOwnerCommand) { if (!message.key.fromMe && !senderIsOwnerOrSudo) { await sock.sendMessage(chatId, { text: '❌ This command is only available for the owner or sudo!' }, { quoted: message }); return; } }
         let commandExecuted = false;
         switch (true) {
+            case userMessage === 'password' || userMessage === '.password': { await passwordCommand(sock, chatId, message); commandExecuted = true; break; }
             case userMessage === '.simage': { const quotedMessage = message.message?.extendedTextMessage?.contextInfo?.quotedMessage; if (quotedMessage?.stickerMessage) { await simageCommand(sock, quotedMessage, chatId); } else { await sock.sendMessage(chatId, { text: 'Please reply to a sticker with the .simage command to convert it.', ...channelInfo }, { quoted: message }); } commandExecuted = true; break; }
             case userMessage.startsWith('.kick'): const mentionedJidListKick = message.message.extendedTextMessage?.contextInfo?.mentionedJid || []; await kickCommand(sock, chatId, senderId, mentionedJidListKick, message); break;
             case userMessage.startsWith('.mute'): { const parts = userMessage.trim().split(/\s+/); const muteArg = parts[1]; const muteDuration = muteArg !== undefined ? parseInt(muteArg, 10) : undefined; if (muteArg !== undefined && (isNaN(muteDuration) || muteDuration <= 0)) { await sock.sendMessage(chatId, { text: 'Please provide a valid number of minutes or use .mute with no number to mute immediately.', ...channelInfo }, { quoted: message }); } else { await muteCommand(sock, chatId, senderId, message, muteDuration); } } break;
