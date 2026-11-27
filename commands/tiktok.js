@@ -30,12 +30,22 @@ async function expandTikTokUrl(url) {
   return url;
 }
 
-function captionFor(title) {
-  const bot = (settings.botName || 'KING MD V4').toUpperCase();
-  return title ? `*DOWNLOADED BY ${bot}*\n\n📝 ${title}` : `*DOWNLOADED BY ${bot}*`;
+function formatViews(n) {
+  return Number(n || 0).toLocaleString('en-US');
 }
 
-// ✅ TikWM - 3 hosts
+// ===== CAPTION WITH ARTIST + VIEWS + DURATION =====
+function captionFor(dl) {
+  const title = dl.title || 'TikTok Video';
+  const artist = dl.author || "Unknown Artist";
+  const username = dl.username ? `@${dl.username}` : "";
+  const views = formatViews(dl.views);
+  const likes = formatViews(dl.likes);
+  const duration = dl.duration ? `${dl.duration}s` : "—";
+  return `🎬 *${title}*\n🎤 *Artist:* ${artist} ${username}\n👀 *Views:* ${views}\n❤️ *Likes:* ${likes}\n⏱️ *Duration:* ${duration}\n\n> Powered by KING MD V4`;
+}
+
+// ✅ TikWM - 3 hosts - NOW WITH ARTIST + VIEWS + DURATION
 async function tikwmDownload(url) {
   const hosts = [
     `https://api.tikwm.com/api/?url=${encodeURIComponent(url)}`,
@@ -48,8 +58,20 @@ async function tikwmDownload(url) {
       const res = await axios.get(apiUrl, { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
       const data = res.data?.data;
       if (!data) continue;
-      if (data.play) return { title: data.title || 'TikTok Video', download: data.play, download_hd: data.hdplay || null, images: data.images || null, audio: data.music || null };
-      if (data.images?.length) return { title: data.title || 'TikTok Photo', images: data.images, audio: data.music || null, download: null };
+      const info = {
+        title: data.title || 'TikTok Video',
+        author: data.author?.nickname || data.author?.unique_id || "Unknown Artist",
+        username: data.author?.unique_id || "",
+        views: data.play_count || 0,
+        likes: data.digg_count || 0,
+        comments: data.comment_count || 0,
+        shares: data.share_count || 0,
+        duration: data.duration || 0,
+        images: data.images || null,
+        audio: data.music || null
+      };
+      if (data.play) return { ...info, download: data.play, download_hd: data.hdplay || null };
+      if (data.images?.length) return { ...info, download: null };
     } catch (e) { lastErr = e; }
   }
   throw lastErr || new Error('TikWM failed');
@@ -59,9 +81,17 @@ async function tikwmDownload(url) {
 async function tiklyDownload(url) {
   const res = await axios.get(`https://api.tiklydown.eu.org/api/download?url=${encodeURIComponent(url)}`, { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } });
   const d = res.data;
-  if (d?.video?.noWatermark) return { title: d.title || 'TikTok Video', download: d.video.noWatermark };
-  if (d?.video?.play) return { title: d.title || 'TikTok Video', download: d.video.play };
-  if (d?.images?.length) return { title: d.title || 'TikTok Photo', images: d.images, audio: d.music?.play || null, download: null };
+  const info = {
+    title: d.title || 'TikTok Video',
+    author: d.author?.nickname || d.author?.name || "Unknown Artist",
+    username: d.author?.unique_id || "",
+    views: d.play_count || d.views || 0,
+    likes: d.digg_count || 0,
+    duration: d.duration || 0
+  };
+  if (d?.video?.noWatermark) return { ...info, download: d.video.noWatermark };
+  if (d?.video?.play) return { ...info, download: d.video.play };
+  if (d?.images?.length) return { ...info, images: d.images, audio: d.music?.play || null, download: null };
   throw new Error('TiklyDown: no video');
 }
 
@@ -71,7 +101,7 @@ async function cobaltDownload(url) {
     timeout: 20000,
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
   });
-  if (res.data?.url) return { title: 'TikTok Video', download: res.data.url };
+  if (res.data?.url) return { title: 'TikTok Video', author: "Unknown Artist", username: "", views: 0, likes: 0, duration: 0, download: res.data.url };
   throw new Error('Cobalt: no url');
 }
 
@@ -83,7 +113,10 @@ async function resolveTikTok(url) {
     { name: 'TikWM', fn: tikwmDownload },
     { name: 'TiklyDown', fn: tiklyDownload },
     { name: 'Cobalt', fn: cobaltDownload },
-    { name: 'Knight', fn: (u) => APIs.knightTikTokDownload(u) },
+    { name: 'Knight', fn: async (u) => {
+      const r = await APIs.knightTikTokDownload(u);
+      return { title: r.title || 'TikTok Video', author: "Unknown Artist", username: "", views: 0, likes: 0, duration: 0, download: r.download || r.dl_url || r.dl, images: r.images || null, audio: r.audio || null };
+    }},
   ];
   for (const src of sources) {
     for (const candidate of candidates) {
@@ -111,10 +144,19 @@ async function tiktokCommand(sock, chatId, message) {
 
     const text = message.message?.conversation || message.message?.extendedTextMessage?.text || '';
     const url = extractUrl(text);
-    if (!url) return sock.sendMessage(chatId, { text: 'Please provide a TikTok link.\nExample: `.tiktok https://vm.tiktok.com/...`' }, { quoted: message });
-    if (!TT_PATTERNS.some((p) => p.test(url))) return sock.sendMessage(chatId, { text: 'That is not a valid TikTok link.' }, { quoted: message });
+    if (!url) {
+      await sock.sendMessage(chatId, { react: { text: "❌", key: message.key } });
+      return sock.sendMessage(chatId, { text: 'Please provide a TikTok link.\nExample: `.tiktok https://vm.tiktok.com/...`' }, { quoted: message });
+    }
+    if (!TT_PATTERNS.some((p) => p.test(url))) {
+      await sock.sendMessage(chatId, { react: { text: "❌", key: message.key } });
+      return sock.sendMessage(chatId, { text: 'That is not a valid TikTok link.' }, { quoted: message });
+    }
 
-    await sock.sendMessage(chatId, { react: { text: '🔄', key: message.key } });
+    // ===== START REACT - RANDOM =====
+    const startReacts = ["🎵", "🎬", "🔥", "😍", "❤️", "⚡", "👑", "💎", "✨", "🎧"];
+    const randomStart = startReacts[Math.floor(Math.random() * startReacts.length)];
+    await sock.sendMessage(chatId, { react: { text: randomStart, key: message.key } });
     await sock.sendMessage(chatId, { text: '⏳ Downloading TikTok...' }, { quoted: message });
 
     const dl = await resolveTikTok(url);
@@ -123,7 +165,7 @@ async function tiktokCommand(sock, chatId, message) {
       for (let i = 0; i < Math.min(dl.images.length, 10); i++) {
         await sock.sendMessage(chatId, {
           image: { url: dl.images[i] },
-          caption: i === 0 ? captionFor(dl.title) : ''
+          caption: i === 0 ? captionFor(dl) : ''
         }, { quoted: message });
       }
       if (dl.audio) {
@@ -151,15 +193,18 @@ async function tiktokCommand(sock, chatId, message) {
       await sock.sendMessage(chatId, {
         video: videoBuffer,
         mimetype: 'video/mp4',
-        caption: captionFor(dl.title)
+        caption: captionFor(dl)
       }, { quoted: message });
     } else {
       throw new Error('The TikTok provider returned no usable media.');
     }
 
+    // ✅ SUCCESS REACT
     await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
   } catch (err) {
     console.error('[tiktok]', err?.message || err);
+    // ❌ ERROR REACT
+    try { await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } }); } catch {}
     await sock.sendMessage(chatId, { text: `❌ Failed to download TikTok video.\n\nReason: ${err?.message?.slice(0,300) || err}` }, { quoted: message });
   }
 }

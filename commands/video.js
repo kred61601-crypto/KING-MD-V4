@@ -14,7 +14,8 @@ function extractUrl(text) {
 
 function formatInfo(video) {
   const views = Number(video.views || 0).toLocaleString('en-US');
-  return `🎬 *${video.title}*\n⏱ Duration: ${video.timestamp || '—'}\n👀 Views: ${views}`;
+  const artist = video.author ? video.author.name : "Unknown Artist";
+  return `🎬 *${video.title}*\n🎤 Artist: ${artist}\n⏱ Duration: ${video.timestamp || '—'}\n👀 Views: ${views}`;
 }
 
 async function resolveVideo(videoUrl) {
@@ -50,6 +51,7 @@ async function videoCommand(sock, chatId, message) {
     const query = text.replace(/^\.(?:video|ytmp4|ytv|ytvid)\s*/i, '').trim();
 
     if (!query) {
+      await sock.sendMessage(chatId, { react: { text: "❌", key: message.key } });
       return sock.sendMessage(
         chatId,
         { text: 'Usage: `.video <name or YouTube URL>`' },
@@ -57,24 +59,53 @@ async function videoCommand(sock, chatId, message) {
       );
     }
 
+    // ===== START REACT - RANDOM =====
+    const startReacts = ["🎬", "🎥", "🔥", "😍", "❤️", "⚡", "👑", "💎", "✨", "🎧"];
+    const randomStart = startReacts[Math.floor(Math.random() * startReacts.length)];
+    await sock.sendMessage(chatId, {
+      react: { text: randomStart, key: message.key }
+    });
+
     let preview;
     let videoUrl;
 
     if (isYouTubeUrl(query)) {
       videoUrl = extractUrl(query);
       const ytId = (videoUrl.match(/(?:youtu\.be\/|v=|shorts\/)([a-zA-Z0-9_-]{11})/) || [])[1];
+
+      // ===== FETCH REAL ARTIST FOR URL TOO =====
+      let ytInfo = null;
+      try {
+        const searchUrl = await yts({ videoId: ytId });
+        ytInfo = searchUrl;
+      } catch {}
+      try {
+        if (!ytInfo || !ytInfo.title) {
+          const s = await yts(videoUrl);
+          ytInfo = s?.videos?.[0];
+        }
+      } catch {}
+
       preview = {
-        title: 'YouTube Video',
+        title: ytInfo?.title || 'YouTube Video',
         thumbnail: ytId ? `https://i.ytimg.com/vi/${ytId}/sddefault.jpg` : null,
+        author: { name: ytInfo?.author?.name || "Unknown Artist" },
+        views: ytInfo?.views || 0,
+        timestamp: ytInfo?.timestamp || "—"
       };
     } else {
       const search = await yts(query);
       preview = search?.videos?.[0];
       if (!preview) {
+        await sock.sendMessage(chatId, { react: { text: "❌", key: message.key } });
         return sock.sendMessage(chatId, { text: '❌ No results found.' }, { quoted: message });
       }
       videoUrl = preview.url;
     }
+
+    const artistName = preview.author ? preview.author.name : "Unknown Artist";
+    const views = Number(preview.views || 0).toLocaleString('en-US');
+    const duration = preview.timestamp || "—";
 
     if (preview.thumbnail) {
       try {
@@ -115,7 +146,6 @@ async function videoCommand(sock, chatId, message) {
       const isVideo = String(media.headers?.['content-type'] || '').toLowerCase().includes('video/');
       if (!isMp4 && !isVideo) throw new Error('The provider did not return a valid video file.');
     }
-    const botName = settings.botName || 'KING MD V4';
     const title = dl.title || preview.title || 'Video';
     const fileName = `${title.replace(/[^\w\s-]/g, '').trim() || 'video'}.mp4`;
 
@@ -125,12 +155,22 @@ async function videoCommand(sock, chatId, message) {
         video,
         mimetype: 'video/mp4',
         fileName,
-        caption: `*${title}*\n\n> *_Downloaded by ${botName}_*`,
+        caption: `🎬 *${title}*\n🎤 *Artist:* ${artistName}\n👀 *Views:* ${views}\n⏱️ *Duration:* ${duration}\n\n> Powered by KING MD V4`,
       },
       { quoted: message }
     );
+
+    // ✅ SUCCESS REACT - After download finish
+    await sock.sendMessage(chatId, {
+      react: { text: "✅", key: message.key }
+    });
+
   } catch (err) {
     console.error('[video]', err?.message || err);
+    // ❌ ERROR REACT
+    try {
+      await sock.sendMessage(chatId, { react: { text: "❌", key: message.key } });
+    } catch {}
     await sock.sendMessage(
       chatId,
       { text: `❌ Download failed: ${err?.message || 'Unknown error'}` },

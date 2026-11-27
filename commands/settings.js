@@ -21,6 +21,13 @@ async function settingsCommand(sock, chatId, message) {
             return;
         }
 
+        // ===== REACT EMOJI SETTINGS - RANDOM, NOT JUST ONE =====
+        const reactEmojis = ["😍", "❤️", "🔥", "⚡", "👑", "💎", "✨", "🍎", "📱", "😎", "🖤", "💯"];
+        const randomReact = reactEmojis[Math.floor(Math.random() * reactEmojis.length)];
+        await sock.sendMessage(chatId, {
+            react: { text: randomReact, key: message.key }
+        });
+
         const isGroup = chatId.endsWith('@g.us');
         const dataDir = './data';
 
@@ -45,42 +52,56 @@ async function settingsCommand(sock, chatId, message) {
         const antitagCfg = groupId ? (userGroupData.antitag && userGroupData.antitag[groupId]) : null;
 
         const lines = [];
-        lines.push('*BOT SETTINGS*');
-        lines.push('');
-        lines.push(`• Mode: ${mode.isPublic ? 'Public' : 'Private'}`);
-        lines.push(`• Auto Status: ${autoStatus.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Autoread: ${autoread.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Autotyping: ${autotyping.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• PM Blocker: ${pmblocker.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Anticall: ${anticall.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Auto Reaction: ${autoReaction ? 'ON' : 'OFF'}`);
-        if (groupId) {
-            lines.push('');
-            lines.push(`Group: ${groupId}`);
-            if (antilinkOn) {
-                const al = userGroupData.antilink[groupId];
-                lines.push(`• Antilink: ON (action: ${al.action || 'delete'})`);
-            } else {
-                lines.push('• Antilink: OFF');
-            }
-            if (antibadwordOn) {
-                const ab = userGroupData.antibadword[groupId];
-                lines.push(`• Antibadword: ON (action: ${ab.action || 'delete'})`);
-            } else {
-                lines.push('• Antibadword: OFF');
-            }
-            lines.push(`• Welcome: ${welcomeOn ? 'ON' : 'OFF'}`);
-            lines.push(`• Goodbye: ${goodbyeOn ? 'ON' : 'OFF'}`);
-            lines.push(`• Chatbot: ${chatbotOn ? 'ON' : 'OFF'}`);
-            if (antitagCfg && antitagCfg.enabled) {
-                lines.push(`• Antitag: ON (action: ${antitagCfg.action || 'delete'})`);
-            } else {
-                lines.push('• Antitag: OFF');
-            }
-        } else {
-            lines.push('');
-            lines.push('Note: Per-group settings will be shown when used inside a group.');
-        }
+        lines.push(`📁 *GENERAL SETTINGS*`);
+        lines.push(`├─ welcome ${welcomeOn ? 'on' : 'off'}`);
+        lines.push(`├─ goodbye ${goodbyeOn ? 'on' : 'off'}`);
+        lines.push(`├─ setwelcome <message>`);
+        lines.push(`└─ setgoodbye <message>`);
+        lines.push(``);
+        lines.push(`📁 *AUTO FEATURES*`);
+        lines.push(`├─ autoread ${autoread.enabled ? 'on' : 'off'}`);
+        lines.push(`├─ autoreact ${autoReaction ? 'on' : 'off'}`);
+        lines.push(`├─ autotyping ${autotyping.enabled ? 'on' : 'off'}`);
+        lines.push(`├─ statusview ${autoStatus.enabled ? 'on' : 'off'}`);
+        lines.push(`├─ recording ${autotyping.enabled ? 'on' : 'off'}`);
+        lines.push(`└─ online on`);
+        lines.push(``);
+        lines.push(`📁 *REPLY SETTINGS*`);
+        lines.push(`├─ mentionreply on/off ✨`);
+        lines.push(`└─ statuslike on/off`);
+        lines.push(``);
+        lines.push(`📁 *ANTI FEATURES*`);
+        lines.push(`├─ antistatus on/off/warn/delete`);
+        lines.push(`├─ antilink ${antilinkOn ? `on/${userGroupData.antilink[groupId].action || 'delete'}` : 'off'}`);
+        lines.push(`├─ antidelete on/off`);
+        lines.push(`├─ anticall ${anticall.enabled ? 'on' : 'off'}`);
+        lines.push(`└─ anticallmsg <message>`);
+        lines.push(``);
+        lines.push(`📁 *USER MANAGEMENT*`);
+        lines.push(`├─ sudo @user`);
+        lines.push(`├─ delsudo @user`);
+        lines.push(`└─ listsudo`);
+        lines.push(``);
+        lines.push(`📁 *BOT CUSTOMIZATION*`);
+        lines.push(`├─ mode ${mode.isPublic ? 'public' : 'private'}`);
+        lines.push(`├─ prefix <new_prefix>`);
+        lines.push(`├─ botname <name>`);
+        lines.push(`├─ ownername <name>`);
+        lines.push(`├─ ownernumber <number>`);
+        lines.push(`├─ description <text>`);
+        lines.push(`├─ botdp <url> or reply to image`);
+        lines.push(`├─ stickername <name>`);
+        lines.push(`├─ delpath same/inbox`);
+        lines.push(`├─ statusemoji 😍,❤️,🔥`);
+        lines.push(`├─ reactemojis 😍,❤️,🔥`);
+        lines.push(`└─ owneremojis 👑,⭐,💎`);
+        lines.push(``);
+        lines.push(`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰`);
+        lines.push(``);
+        lines.push(`💡 *Usage:* .<command> <option>`);
+        lines.push(`📌 *Example:* .mentionreply on`);
+        lines.push(``);
+        lines.push(`> Powered by KING MD V4`);
 
         await sock.sendMessage(chatId, { text: lines.join('\n') }, { quoted: message });
     } catch (error) {
@@ -90,5 +111,3 @@ async function settingsCommand(sock, chatId, message) {
 }
 
 module.exports = settingsCommand;
-
-
