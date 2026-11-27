@@ -299,4 +299,4 @@ Join our channel for updates:`;
     }
 }
 
-module.exports = help
+module.exports = helpCommand;
